@@ -372,7 +372,14 @@ class BundleImporter(ConnectorUnit):
     """
     _model_name = 'magento.product.product'
 
-    def import_bundle(self, magento_record):
+    @property
+    def mapper(self):
+       if self._mapper is None:
+           self._mapper = self.get_connector_unit_for_model(
+                BundleProductImportMapper)
+       return self._mapper
+
+    def run(self, magento_id, binding_id):
         """ Import the bundle information about a product.
 
         :param magento_record: product information from Magento
@@ -468,6 +475,7 @@ class ProductImport(MagentoImportSynchronizer):
         if self.magento_record['type_id'] == 'bundle':
             bundle_importer = self.get_connector_unit_for_model(
                 BundleImporter, self.model._name)
+            bundle_importer.run(self.magento_id, binding_id)
 
 
 @magento
@@ -480,6 +488,11 @@ class IsActiveProductImportMapper(ImportMapper):
         and set active flag in OpenERP
         status == 1 in Magento means active"""
         return {'active': (record.get('status') == '1')}
+
+
+@magento
+class BundleProductImportMapper(ImportMapper):
+    _model_name = 'magento.product.product'
 
 
 @magento
