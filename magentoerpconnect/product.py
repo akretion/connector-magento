@@ -372,14 +372,7 @@ class BundleImporter(ConnectorUnit):
     """
     _model_name = 'magento.product.product'
 
-    @property
-    def mapper(self):
-       if self._mapper is None:
-           self._mapper = self.get_connector_unit_for_model(
-                BundleProductImportMapper)
-       return self._mapper
-
-    def run(self, magento_id, binding_id):
+    def import_bundle(self, magento_record):
         """ Import the bundle information about a product.
 
         :param magento_record: product information from Magento
@@ -397,13 +390,13 @@ class ProductImport(MagentoImportSynchronizer):
                 ProductImportMapper)
        return self._mapper
 
-    def _import_bundle_dependencies(self):
-        """ Import the dependencies for a Bundle """
-        bundle = self.magento_record['_bundle_data']
-        for option in bundle['options']:
-            for selection in option['selections']:
-                self._import_dependency(selection['product_id'],
-                                        'magento.product.product')
+    #def _import_bundle_dependencies(self):
+    #    """ Import the dependencies for a Bundle """
+    #    bundle = self.magento_record['_bundle_data']
+    #    for option in bundle['options']:
+    #        for selection in option['selections']:
+    #            self._import_dependency(selection['product_id'],
+    #                                    'magento.product.product')
 
     def _import_dependencies(self):
         """ Import the dependencies for the record"""
@@ -412,8 +405,8 @@ class ProductImport(MagentoImportSynchronizer):
         for mag_category_id in record['categories']:
             self._import_dependency(mag_category_id,
                                     'magento.product.category')
-        if record['type_id'] == 'bundle':
-            self._import_bundle_dependencies()
+        #if record['type_id'] == 'bundle':
+        #    self._import_bundle_dependencies()
 
     def _validate_product_type(self, data):
         """ Check if the product type is in the selection (so we can
@@ -475,7 +468,6 @@ class ProductImport(MagentoImportSynchronizer):
         if self.magento_record['type_id'] == 'bundle':
             bundle_importer = self.get_connector_unit_for_model(
                 BundleImporter, self.model._name)
-            bundle_importer.run(self.magento_id, binding_id)
 
 
 @magento
@@ -575,6 +567,12 @@ class ProductImportMapper(ImportMapper):
     def backend_id(self, record):
         return {'backend_id': self.backend_record.id}
 
+    @mapping
+    def bundle_mapping(self, record):
+        if record['type_id'] == 'bundle':
+            bundle_mapper = self.environment.get_connector_unit(BundleProductImportMapper)
+            map_record = bundle_mapper.map_record(record)
+            return map_record.values()
 
 @magento
 class ProductInventoryExport(ExportSynchronizer):

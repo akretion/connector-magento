@@ -171,6 +171,7 @@ class magento_sale_order_line(orm.Model):
         'tax_rate': fields.float('Tax Rate',
                                  digits_compute=dp.get_precision('Account')),
         'notes': fields.char('Notes'), # XXX common to all ecom sale orders
+        'magento_parent_item_id': fields.integer('Magento Parent Item ID'),
         }
 
     _sql_constraints = [
@@ -361,6 +362,17 @@ class SaleOrderMoveComment(ConnectorUnit):
     def move(self, binding):
         pass
 
+@magento
+class SaleOrderBundleImport(ConnectorUnit):
+    _model_name = ['magento.sale.order']
+
+    def _merge_sub_items(self, product_type, top_item, child_items):
+        items = []
+        bundle_item = top_item.copy()
+        items = [child for child in child_items]
+        items.insert(0, bundle_item)
+        return items
+
 
 @magento
 class SaleOrderImport(MagentoImportSynchronizer):
@@ -429,6 +441,11 @@ class SaleOrderImport(MagentoImportSynchronizer):
             for field in ['sku', 'product_id', 'name']:
                 item[field] = child_items[0][field]
             return item
+        elif product_type == 'bundle':
+            bundle_import = self.get_connector_unit_for_model(
+                SaleOrderBundleImport, self.model._name)
+            return bundle_import._merge_sub_items(
+                product_type, top_item, child_items)
         return top_item
 
     def _import_customer_group(self, group_id):
@@ -494,7 +511,13 @@ class SaleOrderImport(MagentoImportSynchronizer):
                                    {'canceled_in_backend': True})
             current_bind_id = parent_bind_id
 
+    def _link_hierarchical_lines(self, binding_id):
+        bundle_import = self.get_connector_unit_for_model(
+            SaleOrderBundleImport, self.model._name)
+        bundle_import._link_hierarchical_lines(binding_id)
+
     def _after_import(self, binding_id):
+        self._link_hierarchical_lines(binding_id)
         self._link_parent_orders(binding_id)
         self._create_payment(binding_id)
         binding = self.session.browse(self.model._name, binding_id)
@@ -853,6 +876,14 @@ class MagentoSaleOrderOnChange(SaleOrderOnChange):
 
 
 @magento
+class SaleOrderLineBundleImportMapper(ConnectorUnit):
+    _model_name = 'magento.sale.order.line'
+
+    def  price_is_zero(self, record):
+        return False
+
+
+@magento
 class SaleOrderLineImportMapper(ImportMapper):
     _model_name = 'magento.sale.order.line'
 
@@ -860,6 +891,7 @@ class SaleOrderLineImportMapper(ImportMapper):
               ('qty_ordered', 'product_uos_qty'),
               ('name', 'name'),
               ('item_id', 'magento_id'),
+              ('parent_item_id', 'magento_parent_item_id'),
             ]
 
     @mapping
@@ -883,7 +915,7 @@ class SaleOrderLineImportMapper(ImportMapper):
                ("product_id %s should have been imported in "
                 "SaleOrderImport._import_dependencies" % record['product_id'])
         return {'product_id': product_id}
-    
+
     @mapping
     def product_options(self, record):
         result = {}
@@ -904,14 +936,18 @@ class SaleOrderLineImportMapper(ImportMapper):
     @mapping
     def price(self, record):
         result = {}
-        backend = self.backend_record
-        base_row_total = float(record['base_row_total'] or 0.)
-        base_row_total_incl_tax = float(record['base_row_total_incl_tax'] or 0.)
-        qty_ordered = float(record['qty_ordered'])
-        if self.options.tax_include:
-            result['price_unit'] = base_row_total_incl_tax / qty_ordered
+        bundle_mapper = self.get_connector_unit_for_model(
+            SaleOrderLineBundleImportMapper, self.model._name)
+        if bundle_mapper.price_is_zero(record):
+            result['price_unit'] = 0
         else:
-            result['price_unit'] = base_row_total / qty_ordered
+            base_row_total = float(record['base_row_total'] or 0.)
+            base_row_total_incl_tax = float(record['base_row_total_incl_tax'] or 0.)
+            qty_ordered = float(record['qty_ordered'])
+            if self.options.tax_include:
+                result['price_unit'] = base_row_total_incl_tax / qty_ordered
+            else:
+                result['price_unit'] = base_row_total / qty_ordered
         return result
 
 
