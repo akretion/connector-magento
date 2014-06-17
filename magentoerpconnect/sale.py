@@ -366,13 +366,15 @@ class SaleOrderMoveComment(ConnectorUnit):
 class SaleOrderBundleImport(ConnectorUnit):
     _model_name = ['magento.sale.order']
 
-    def _merge_sub_items(self, product_type, top_item, child_items):
+    def merge_sub_items(self, product_type, top_item, child_items):
         items = []
         bundle_item = top_item.copy()
         items = [child for child in child_items]
         items.insert(0, bundle_item)
         return items
 
+    def link_hierarchical_lines(self, binding_id):
+        return True
 
 @magento
 class SaleOrderImport(MagentoImportSynchronizer):
@@ -444,7 +446,7 @@ class SaleOrderImport(MagentoImportSynchronizer):
         elif product_type == 'bundle':
             bundle_import = self.get_connector_unit_for_model(
                 SaleOrderBundleImport, self.model._name)
-            return bundle_import._merge_sub_items(
+            return bundle_import.merge_sub_items(
                 product_type, top_item, child_items)
         return top_item
 
@@ -514,7 +516,7 @@ class SaleOrderImport(MagentoImportSynchronizer):
     def _link_hierarchical_lines(self, binding_id):
         bundle_import = self.get_connector_unit_for_model(
             SaleOrderBundleImport, self.model._name)
-        bundle_import._link_hierarchical_lines(binding_id)
+        bundle_import.link_hierarchical_lines(binding_id)
 
     def _after_import(self, binding_id):
         self._link_hierarchical_lines(binding_id)

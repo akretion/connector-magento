@@ -570,7 +570,8 @@ class ProductImportMapper(ImportMapper):
     @mapping
     def bundle_mapping(self, record):
         if record['type_id'] == 'bundle':
-            bundle_mapper = self.environment.get_connector_unit(BundleProductImportMapper)
+            bundle_mapper = self.environment.get_connector_unit(
+                BundleProductImportMapper)
             map_record = bundle_mapper.map_record(record)
             return map_record.values()
 
