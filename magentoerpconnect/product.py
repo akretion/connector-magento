@@ -29,7 +29,6 @@ from openerp.osv import orm, fields
 from openerp.tools.translate import _
 from openerp.addons.connector.queue.job import job, related_action
 from openerp.addons.connector.event import on_record_write
-from openerp.addons.connector.connector import ConnectorUnit
 from openerp.addons.connector.unit.synchronizer import (ImportSynchronizer,
                                                         ExportSynchronizer
                                                         )
@@ -328,7 +327,7 @@ class CatalogImageImporter(ImportSynchronizer):
 
 
 @magento
-class BundleImporter(ConnectorUnit):
+class BundleImporter(ImportSynchronizer):
     """ Can be inherited to change the way the bundle products are
     imported.
 
