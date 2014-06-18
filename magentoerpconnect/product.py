@@ -498,6 +498,11 @@ class IsActiveProductImportMapper(ImportMapper):
 
 
 @magento
+class BundleProductImportMapper(ImportMapper):
+    _model_name = 'magento.product.product'
+
+
+@magento
 class ProductImportMapper(ImportMapper):
     _model_name = 'magento.product.product'
     # TODO :     categ, special_price => minimal_price
@@ -577,6 +582,12 @@ class ProductImportMapper(ImportMapper):
     def backend_id(self, record):
         return {'backend_id': self.backend_record.id}
 
+    @mapping
+    def bundle_mapping(self, record):
+        if record['type_id'] == 'bundle':
+            bundle_mapper = self.get_connector_unit_for_model(
+                BundleProductImportMapper)
+            return bundle_mapper.map_record(record).values()
 
 @magento
 class ProductInventoryExport(ExportSynchronizer):
