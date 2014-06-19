@@ -485,18 +485,6 @@ class IsActiveProductImportMapper(ImportMapper):
 
 
 @magento
-class IsActiveProductImportMapper(ImportMapper):
-    _model_name = 'magento.product.product'
-
-    @mapping
-    def is_active(self, record):
-        """Check if the product is active in Magento
-        and set active flag in OpenERP
-        status == 1 in Magento means active"""
-        return {'active': (record.get('status') == '1')}
-
-
-@magento
 class BundleProductImportMapper(ImportMapper):
     _model_name = 'magento.product.product'
 
