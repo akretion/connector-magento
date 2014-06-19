@@ -390,13 +390,13 @@ class ProductImport(MagentoImportSynchronizer):
                 ProductImportMapper)
        return self._mapper
 
-    #def _import_bundle_dependencies(self):
-    #    """ Import the dependencies for a Bundle """
-    #    bundle = self.magento_record['_bundle_data']
-    #    for option in bundle['options']:
-    #        for selection in option['selections']:
-    #            self._import_dependency(selection['product_id'],
-    #                                    'magento.product.product')
+    def _import_bundle_dependencies(self):
+        """ Import the dependencies for a Bundle """
+        bundle = self.magento_record['_bundle_data']
+        for option in bundle['options']:
+            for selection in option['selections']:
+                self._import_dependency(selection['product_id'],
+                                        'magento.product.product')
 
     def _import_dependencies(self):
         """ Import the dependencies for the record"""
@@ -405,8 +405,8 @@ class ProductImport(MagentoImportSynchronizer):
         for mag_category_id in record['categories']:
             self._import_dependency(mag_category_id,
                                     'magento.product.category')
-        #if record['type_id'] == 'bundle':
-        #    self._import_bundle_dependencies()
+        if record['type_id'] == 'bundle':
+            self._import_bundle_dependencies()
 
     def _validate_product_type(self, data):
         """ Check if the product type is in the selection (so we can

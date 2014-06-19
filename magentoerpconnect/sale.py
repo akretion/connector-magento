@@ -366,13 +366,6 @@ class SaleOrderMoveComment(ConnectorUnit):
 class SaleOrderBundleImport(ConnectorUnit):
     _model_name = ['magento.sale.order']
 
-    def merge_sub_items(self, product_type, top_item, child_items):
-        items = []
-        bundle_item = top_item.copy()
-        items = [child for child in child_items]
-        items.insert(0, bundle_item)
-        return items
-
     def link_hierarchical_lines(self, binding_id):
         return True
 
@@ -444,10 +437,11 @@ class SaleOrderImport(MagentoImportSynchronizer):
                 item[field] = child_items[0][field]
             return item
         elif product_type == 'bundle':
-            bundle_import = self.get_connector_unit_for_model(
-                SaleOrderBundleImport, self.model._name)
-            return bundle_import.merge_sub_items(
-                product_type, top_item, child_items)
+            items = []
+            bundle_item = top_item.copy()
+            items = [child for child in child_items]
+            items.insert(0, bundle_item)
+            return items
         return top_item
 
     def _import_customer_group(self, group_id):
@@ -514,6 +508,8 @@ class SaleOrderImport(MagentoImportSynchronizer):
             current_bind_id = parent_bind_id
 
     def _link_hierarchical_lines(self, binding_id):
+        """ Get Magento order lines to link the parent order line.
+        """
         bundle_import = self.get_connector_unit_for_model(
             SaleOrderBundleImport, self.model._name)
         bundle_import.link_hierarchical_lines(binding_id)
@@ -938,18 +934,19 @@ class SaleOrderLineImportMapper(ImportMapper):
     @mapping
     def price(self, record):
         result = {}
-        bundle_mapper = self.get_connector_unit_for_model(
+        if record['product_type'] == 'bundle':
+            bundle_mapper = self.get_connector_unit_for_model(
             SaleOrderLineBundleImportMapper, self.model._name)
-        if bundle_mapper.price_is_zero(record):
-            result['price_unit'] = 0
+            if bundle_mapper.price_is_zero(record):
+                result['price_unit'] = 0
+                return result
+        base_row_total = float(record['base_row_total'] or 0.)
+        base_row_total_incl_tax = float(record['base_row_total_incl_tax'] or 0.)
+        qty_ordered = float(record['qty_ordered'])
+        if self.options.tax_include:
+            result['price_unit'] = base_row_total_incl_tax / qty_ordered
         else:
-            base_row_total = float(record['base_row_total'] or 0.)
-            base_row_total_incl_tax = float(record['base_row_total_incl_tax'] or 0.)
-            qty_ordered = float(record['qty_ordered'])
-            if self.options.tax_include:
-                result['price_unit'] = base_row_total_incl_tax / qty_ordered
-            else:
-                result['price_unit'] = base_row_total / qty_ordered
+            result['price_unit'] = base_row_total / qty_ordered
         return result
 
 
