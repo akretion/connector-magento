@@ -27,9 +27,8 @@ import xmlrpclib
 import sys
 from openerp.osv import orm, fields
 from openerp.tools.translate import _
-from openerp.addons.connector.queue.job import job
+from openerp.addons.connector.queue.job import job, related_action
 from openerp.addons.connector.event import on_record_write
-from openerp.addons.connector.connector import ConnectorUnit
 from openerp.addons.connector.unit.synchronizer import (ImportSynchronizer,
                                                         ExportSynchronizer
                                                         )
@@ -50,6 +49,7 @@ from .unit.import_synchronizer import (DelayedBatchImport,
                                        )
 from .connector import get_environment
 from .backend import magento
+from .related_action import unwrap_binding
 
 _logger = logging.getLogger(__name__)
 
@@ -177,6 +177,7 @@ class product_product(orm.Model):
 class ProductProductAdapter(GenericAdapter):
     _model_name = 'magento.product.product'
     _magento_model = 'catalog_product'
+    _admin_path = '/{model}/edit/id/{id}'
 
     def _call(self, method, arguments):
         try:
@@ -326,7 +327,7 @@ class CatalogImageImporter(ImportSynchronizer):
 
 
 @magento
-class BundleImporter(ConnectorUnit):
+class BundleImporter(ImportSynchronizer):
     """ Can be inherited to change the way the bundle products are
     imported.
 
@@ -366,13 +367,14 @@ class BundleImporter(ConnectorUnit):
             def product_type_get(self, cr, uid, context=None):
                 types = super(magento_product_product, self).product_type_get(
                     cr, uid, context=context)
-                types.append(('bundle', 'Bundle Product'))
+                if 'bundle' not in [item[0] for item in types]:
+                    types.append(('bundle', 'Bundle'))
                 return types
 
     """
     _model_name = 'magento.product.product'
 
-    def import_bundle(self, magento_record):
+    def run(self, binding_id, magento_record):
         """ Import the bundle information about a product.
 
         :param magento_record: product information from Magento
@@ -460,7 +462,8 @@ class ProductImport(MagentoImportSynchronizer):
         """ Hook called at the end of the import """
         translation_importer = self.get_connector_unit_for_model(
             TranslationImporter, self.model._name)
-        translation_importer.run(self.magento_id, binding_id)
+        translation_importer.run(self.magento_id, binding_id,
+                                 mapper_class=ProductImportMapper)
         image_importer = self.get_connector_unit_for_model(
             CatalogImageImporter, self.model._name)
         image_importer.run(self.magento_id, binding_id)
@@ -468,6 +471,7 @@ class ProductImport(MagentoImportSynchronizer):
         if self.magento_record['type_id'] == 'bundle':
             bundle_importer = self.get_connector_unit_for_model(
                 BundleImporter, self.model._name)
+            bundle_importer.run(binding_id, self.magento_record)
 
 
 @magento
@@ -638,6 +642,7 @@ def magento_product_modified(session, model_name, record_id, vals):
 
 
 @job
+@related_action(action=unwrap_binding)
 def export_product_inventory(session, model_name, record_id, fields=None):
     """ Export the inventory configuration and quantity of a product. """
     product = session.browse(model_name, record_id)
