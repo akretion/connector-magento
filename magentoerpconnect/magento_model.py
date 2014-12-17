@@ -411,6 +411,14 @@ class magento_storeview(orm.Model):
             'Import sale orders from date',
             help='do not consider non-imported sale orders before this date. '
                  'Leave empty to import all sale orders'),
+	'no_sales_order_sync': fields.boolean(
+            'No Sales Order Synchronization',
+            help='Check if the storeview is active in Magento '
+                 'but its sales orders should not be imported.'),
+    }
+
+    _defaults = {
+        'no_sales_order_sync': False,
     }
 
     _sql_constraints = [
@@ -422,6 +430,11 @@ class magento_storeview(orm.Model):
         session = ConnectorSession(cr, uid, context=context)
         import_start_time = datetime.now().strftime(DEFAULT_SERVER_DATETIME_FORMAT)
         for storeview in self.browse(cr, uid, ids, context=context):
+	    if storeview.no_sales_order_sync:
+                _logger.debug("The storeview '%s' is active in Magento "
+                              "but its sales orders should not be imported." %
+                              storeview.name)
+                continue
             backend_id = storeview.backend_id.id
             if storeview.import_orders_from_date:
                 from_date = datetime.strptime(
