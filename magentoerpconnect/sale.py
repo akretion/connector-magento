@@ -83,7 +83,7 @@ class magento_sale_order(orm.Model):
 
     _sql_constraints = [
         ('magento_uniq', 'unique(backend_id, magento_id)',
-         'A sale order line with the same ID on Magento already exists.'),
+         'A sale order with the same ID on Magento already exists.'),
     ]
 
 
@@ -190,6 +190,66 @@ class SaleOrderAdapter(GenericAdapter):
     _model_name = 'magento.sale.order'
     _magento_model = 'sales_order'
 
+
+    def _clean_magento_items(self, resource):
+        """
+        Method that clean the sale order line given by magento before importing it
+
+        This method has to stay here because it allow to customize the behavior of the sale
+        order.
+
+        """
+        child_items = {}  # key is the parent item id
+        top_items = []
+
+        # Group the childs with their parent
+        for item in resource['items']:
+            if item.get('parent_item_id'):
+                child_items.setdefault(item['parent_item_id'], []).append(item)
+            else:
+                top_items.append(item)
+
+        all_items = []
+        for top_item in top_items:
+            if top_item['item_id'] in child_items:
+                item_modified = self._merge_sub_items(
+                                                      top_item['product_type'],
+                                                      top_item,
+                                                      child_items[top_item['item_id']]
+                                                      )
+                if not isinstance(item_modified, list):
+                    item_modified = [item_modified]
+                all_items.extend(item_modified)
+            else:
+                all_items.append(top_item)
+        resource['items'] = all_items
+        return resource
+
+    def _merge_sub_items(self, product_type, top_item, child_items):
+        """
+        Manage the sub items of the magento sale order lines. A top item contains one
+        or many child_items. For some product types, we want to merge them in the main
+        item, or keep them as order line.
+
+        This method has to stay because it allow to customize the behavior of the sale
+        order according to the product type.
+
+        A list may be returned to add many items (ie to keep all child_items as items.
+
+        :param top_item: main item (bundle, configurable)
+        :param child_items: list of childs of the top item
+        :return: item or list of items
+        """
+        if product_type == 'configurable':
+            item = top_item.copy()
+            # For configurable product all information regarding the price is in the configurable item
+            # In the child a lot of information is empty, but contains the right sku and product_id
+            # So the real product_id and the sku and the name have to be extracted from the child
+            for field in ['sku', 'product_id', 'name']:
+                item[field] = child_items[0][field]
+            return item
+        return top_item
+
     def _call(self, method, arguments):
         try:
             return super(SaleOrderAdapter, self)._call(method, arguments)
@@ -225,8 +285,11 @@ class SaleOrderAdapter(GenericAdapter):
 
         :rtype: dict
         """
-        return self._call('%s.info' % self._magento_model,
-                          [id, attributes])
+        record = self._call('%s.info' % self._magento_model,
+                            [id, attributes])
+        return self._clean_magento_items(record)
+        #return self._call('%s.info' % self._magento_model,
+        #                  [id, attributes])
 
     def get_parent(self, id):
         return self._call('%s.get_parent' % self._magento_model, [id])
@@ -402,18 +465,19 @@ class SaleOrderImport(MagentoImportSynchronizer):
         # sometimes we don't have website_id...
         # we fix the record!
         if not record.get('website_id'):
-            # deduce it from the store
-            store_binder = self.get_binder_for_model('magento.store')
-            oe_store_id = store_binder.to_openerp(record['store_id'])
-            store = self.session.browse('magento.store', oe_store_id)
-            oe_website_id = store.website_id.id
+            # deduce it from the storeview
+            store_binder = self.get_binder_for_model('magento.storeview')
+            oe_storeview_id = store_binder.to_openerp(record['store_id'])
+            storeview = self.session.browse('magento.storeview', oe_storeview_id)
+            oe_website_id = storeview.store_id.website_id.id
             # "fix" the record
-            record['website_id'] = store.website_id.magento_id
+            record['website_id'] = storeview.store_id.website_id.magento_id
         return record
 
     def _import_addresses(self):
         record = self.magento_record
         sess = self.session
+
 
         # Magento allows to create a sale order not registered as a user
         is_guest_order = bool(int(record.get('customer_is_guest', 0) or 0))
@@ -428,7 +492,9 @@ class SaleOrderImport(MagentoImportSynchronizer):
             # search an existing partner with the same email
             partner_ids = sess.search('magento.res.partner',
                                       [('emailid', '=', record['customer_email']),
-                                       ('website_id', '=', oe_website_id)])
+            # TODO FIX
+                                      #('website_id', '=', oe_website_id)
+                                       ])
 
             # if we have found one, we "fix" the record with the magento
             # customer id
@@ -476,9 +542,24 @@ class SaleOrderImport(MagentoImportSynchronizer):
             mapper.convert(customer_record)
             oe_record = mapper.data_for_create
             oe_record['guest_customer'] = True
-            partner_bind_id = sess.create('magento.res.partner', oe_record)
-        else:
 
+            domain = [
+                ['emailid', '=', oe_record['emailid']],
+                ['group_id', '=', oe_record['group_id']],
+                ['backend_id', '=', oe_record['backend_id']],
+            # TODO FIX
+                #['website_id', '=', oe_record['website_id']],
+            ]
+
+            partner_bind_id = self.session.search('magento.res.partner', domain)
+
+            if partner_bind_id:
+                partner_bind_id = partner_bind_id[0]
+                sess.write('magento.res.partner', partner_bind_id, oe_record)
+            else:
+                partner_bind_id = sess.create('magento.res.partner', oe_record)
+
+        else:
             # we always update the customer when importing an order
             importer = self.get_connector_unit_for_model(MagentoImportSynchronizer,
                                                          'magento.res.partner')
@@ -518,7 +599,24 @@ class SaleOrderImport(MagentoImportSynchronizer):
             addr_mapper.convert(address_record)
             oe_address = addr_mapper.data_for_create
             oe_address.update(addresses_defaults)
-            address_bind_id = sess.create('magento.address', oe_address)
+
+            domain = [
+                ['email', '=', oe_address['email']],
+                ['magento_partner_id', '=', oe_address['magento_partner_id']],
+                ['street', '=', oe_address['street']],
+                ['zip', '=', oe_address['zip']],
+                ['city', '=', oe_address['city']],
+                ['country_id', '=', oe_address['country_id']],
+                ['parent_id', '=', oe_address['parent_id']],
+            ]
+
+            address_bind_id = self.session.search('magento.address', domain)
+            if address_bind_id:
+                address_bind_id = address_bind_id[0]
+                sess.write('magento.address', address_bind_id, oe_address)
+            else:
+                address_bind_id = sess.create('magento.address', oe_address)
+
             return sess.read('magento.address',
                              address_bind_id,
                              ['openerp_id'])['openerp_id'][0]
@@ -532,6 +630,9 @@ class SaleOrderImport(MagentoImportSynchronizer):
         self.partner_id = partner_id
         self.partner_invoice_id = billing_id
         self.partner_shipping_id = shipping_id or billing_id
+
+        #TODO FIXME
+        self.magento_record['oe_partner_id'] = partner_id
 
     def _update_special_fields(self, data):
         assert self.partner_id, "self.partner_id should have been defined in SaleOrderImport._import_addresses"
@@ -610,6 +711,8 @@ class SaleOrderImportMapper(ImportMapper):
 
     @mapping
     def customer_id(self, record):
+        if record.get('oe_partner_id'):
+            return {'partner_id': record['oe_partner_id']}
         binder = self.get_binder_for_model('magento.res.partner')
         partner_id = binder.to_openerp(record['customer_id'], unwrap=True)
         assert partner_id is not None, \
@@ -715,7 +818,7 @@ class SaleOrderLineImportMapper(ImportMapper):
 
     direct = [('qty_ordered', 'product_uom_qty'),
               ('qty_ordered', 'product_uos_qty'),
-              ('name', 'name'),
+             #('name', 'name'),
               ('item_id', 'magento_id'),
             ]
 

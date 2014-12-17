@@ -214,6 +214,11 @@ class PartnerAdapter(GenericAdapter):
         # the search method is on ol_customer instead of customer
         return self._call('ol_customer.search',
                           [filters] if filters else [{}])
+    
+    def read(self, id, attributes=None):
+        record =super(PartnerAdapter, self).read(id, attributes)
+        record['email'] = record['email'].lower()
+        return record
 
 
 @magento
@@ -301,10 +306,11 @@ class PartnerImportMapper(ImportMapper):
             ('created_at', 'created_at'),
             ('updated_at', 'updated_at'),
             ('email', 'emailid'),
-            ('taxvat', 'taxvat'),
+            ('taxvat', 'vat'),
             ('group_id', 'group_id'),
         ]
 
+    @only_create
     @mapping
     def is_company(self, record):
         # partners are companies so we can bind
@@ -402,7 +408,8 @@ class AddressImport(MagentoImportSynchronizer):
         self.link_with_partner = link_with_partner
         super(AddressImport, self).run(magento_id)
 
-    def _update_special_fields(self, data):
+    def _define_partner_relationship(self, data):
+        """ Link address with partner or parent company. """
         if self.link_with_partner:
             # it won't be imported as an address,
             # but will be linked with the main res.partner
@@ -416,13 +423,29 @@ class AddressImport(MagentoImportSynchronizer):
         return data
 
     def _create(self, data):
-        data = self._update_special_fields(data)
+        data = self._define_partner_relationship(data)
         return super(AddressImport, self)._create(data)
 
-    def _update(self, binding_id, data):
-        data = self._update_special_fields(data)
-        return super(AddressImport, self)._update(binding_id, data)
+    def _get_binding_id(self):
+        """Return the binding id from the magento id"""
 
+        binding_id = super(AddressImport, self)._get_binding_id()
+
+        if not binding_id:
+            record = self.mapper.data
+
+            domain = [
+                ['name', '=', record['name']],
+                ['street', '=', record['street']],
+                ['zip', '=', record['zip']],
+                ['city', '=', record['city']],
+                ['country_id', '=', record['country_id']],
+                ]
+            binding_id = self.session.search(self._model_name[0], domain)
+            if binding_id:
+                binding_id = binding_id[0]
+
+        return binding_id
 
 @magento
 class AddressImportMapper(ImportMapper):
@@ -454,10 +477,10 @@ class AddressImportMapper(ImportMapper):
 
     @mapping
     def state(self, record):
-        if not record.get('state'):
+        if not record.get('region'):
             return
         state_ids = self.session.search('res.country.state',
-                                        [('name', 'ilike', record['state'])])
+                                        [('name', 'ilike', record['region'])])
         if state_ids:
             return {'state_id': state_ids[0]}
 

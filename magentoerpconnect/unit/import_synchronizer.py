@@ -143,16 +143,16 @@ class MagentoImportSynchronizer(ImportSynchronizer):
             self.magento_record = self._get_magento_data()
         except IDMissingInBackend:
             return _('Record does no longer exist in Magento')
-        binding_id = self._get_binding_id()
 
-        if not force and self._is_uptodate(binding_id):
-            return _('Already up-to-date.')
+        #if not force and self._is_uptodate(binding_id):
+        #    return _('Already up-to-date.')
         self._before_import()
 
         # import the missing linked resources
         self._import_dependencies()
-
         self._map_data()
+
+        binding_id = self._get_binding_id()
 
         if binding_id:
             record = self.mapper.data

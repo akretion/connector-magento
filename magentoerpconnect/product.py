@@ -410,6 +410,17 @@ class ProductImportMapper(ImportMapper):
     def backend_id(self, record):
         return {'backend_id': self.backend_record.id}
 
+    @only_create
+    @mapping
+    def openerp_id(self, record):
+        """ Will bind the product on a existing product
+        with the same code """
+        sess = self.session
+        product_ids = sess.search('product.product',
+                                  [('default_code', '=', record['sku']),
+                                    ])
+        if product_ids:
+            return {'openerp_id': product_ids[0]}
 
 @magento
 class ProductInventoryExport(ExportSynchronizer):
