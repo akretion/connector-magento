@@ -20,17 +20,11 @@
 ##############################################################################
 
 from openerp.osv import orm, fields
-from openerp.addons.connector.connector import Environment
+from openerp.addons.connector.connector import (Environment,
+                                                install_in_connector)
 from openerp.addons.connector.checkpoint import checkpoint
 
-
-class magentoerpconnect_installed(orm.AbstractModel):
-    """Empty model used to know if the module is installed on the
-    database.
-
-    If the model is in the registry, the module is installed.
-    """
-    _name = 'magentoerpconnect.installed'
+install_in_connector()
 
 
 def get_environment(session, model_name, backend_id):
@@ -41,6 +35,7 @@ def get_environment(session, model_name, backend_id):
     lang_code = lang.code if lang else 'en_US'
     env.set_lang(code=lang_code)
     return env
+
 
 class magento_binding(orm.AbstractModel):
     """ Abstract Model for the Bindigs.
@@ -73,7 +68,7 @@ def add_checkpoint(session, model_name, record_id, backend_id):
     meaning it has to be reviewed by a user.
 
     :param session: current session
-    :type session: :py:class:`openerp.addons.connector.session.ConnectorSession`
+    :type session: :class:`openerp.addons.connector.session.ConnectorSession`
     :param model_name: name of the model of the record to be reviewed
     :type model_name: str
     :param record_id: ID of the record to be reviewed

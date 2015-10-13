@@ -28,7 +28,7 @@ to create your own module and apply your personalizations from there.
 As an example, throughout this tutorial, we'll create our own
 customization module, we'll name it, in a very original manner,
 ``customize_example``. The final example module can be found in the root
-of the ``magentoerpconnect`` bazaar branch.
+of the ``connector-magento`` repository.
 
 Common OpenERP files
 ====================
@@ -67,30 +67,21 @@ Nothing special but 2 things to note:
 Of course, you also need to create the ``__init__.py`` file where you will
 put the imports of your python modules.
 
-Declare the module to the connector
+Install the module in the connector
 ===================================
 
-Each module using the ``connector`` needs to create a special empty
-model, which will be used by the framework to know if the module is
-installed or not on each database.
+Each new module needs to be plugged in the connector's framework.
+That's just a matter of following a convention and creating
+``connector.py`` in which you will call the
+``install_in_connector`` function::
 
-That's just a matter of following a convention and creating in ``customize_example/connector.py``::
-
-    from openerp.osv import orm
+    from openerp.addons.connector.connector import install_in_connector
 
 
-    class customize_example_installed(orm.AbstractModel):
-        """Empty model used to know if the module is installed on the
-        database.
+    install_in_connector()
 
-        If the model is in the registry, the module is installed.
-        """
-        _name = 'customize_example.installed'
-
-Note:
-
-* the ``_name`` is in the form: ``module_name.installed``, where
-  ``.installed`` is the part which does never change.
+.. warning:: If you miss this line of code, your custom ConnectorUnit
+             classes won't be used.
 
 
 Create your custom Backend
@@ -139,18 +130,14 @@ And in ``customize_example/magento_model.py``::
     class magento_backend(orm.Model):
         _inherit = 'magento.backend'
 
-        def _select_versions(self, cr, uid, context=None):
-            """ Available versions
+        def select_versions(self, cr, uid, context=None):
+            """ Available versions in the backend.
 
             Can be inherited to add custom versions.
             """
-            versions = super(magento_backend, self)._select_versions(cr, uid, context=context)
+            versions = super(magento_backend, self).select_versions(cr, uid, context=context)
             versions.append(('1.7-myversion', '1.7 - My Version'))
             return versions
-
-        _columns = {
-            'version': fields.selection(_select_versions, string='Version', required=True),
-        }
 
 Things to note:
 
@@ -195,9 +182,11 @@ A bit of theory
 ===============
 
 The mappings of the fields are defined in subclasses of
-:py:class:`connector.connector.unit.mapper.ImportMapper` or
-:py:class:`connector.connector.unit.mapper.ExportMapper`, respectively
+:py:class:`connector.unit.mapper.ImportMapper` or
+:py:class:`connector.unit.mapper.ExportMapper`, respectively
 for the imports and the exports.
+
+See the documentation about :py:class:`~connector.unit.mapper.Mapper`.
 
 .. note:: The connector almost never works with the OpenERP Models
           directly. Instead, it works with its own models, which
@@ -210,7 +199,7 @@ for the imports and the exports.
 
 When you need to change the mappings, you'll need to dive in the
 ``magentoerpconnect``'s code and locate the class which does this job for
-your model. You won't change anything on this class, but you'll extend
+your model. You won't change anything in this class, but you'll extend
 it so you need to have a look on it.  For example, the mapping for
 ``magento.res.partner`` in ``magentoerpconnect`` is the following
 (excerpt)::

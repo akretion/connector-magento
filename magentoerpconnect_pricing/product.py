@@ -21,7 +21,7 @@
 
 
 from openerp.tools.translate import _
-from openerp.addons.connector.queue.job import job
+from openerp.addons.connector.queue.job import job, related_action
 from openerp.addons.connector.exception import FailedJobError
 from openerp.addons.connector.unit.mapper import (mapping,
                                                   only_create
@@ -32,12 +32,13 @@ from openerp.addons.magentoerpconnect.unit.export_synchronizer import (
 from openerp.addons.magentoerpconnect.backend import magento
 from openerp.addons.magentoerpconnect import product
 from openerp.addons.magentoerpconnect.connector import get_environment
+from openerp.addons.magentoerpconnect.related_action import (
+    unwrap_binding,
+)
 
 
-magento.unregister_class(product.ProductImportMapper)
-
-
-@magento
+# TODO: replace a price mapper only, not the full mapper
+@magento(replacing=product.ProductImportMapper)
 class ProductImportMapper(product.ProductImportMapper):
     _model_name = 'magento.product.product'
 
@@ -47,7 +48,7 @@ class ProductImportMapper(product.ProductImportMapper):
         """ The price is imported at the creation of
         the product, then it is only modified and exported
         from OpenERP """
-        super(ProductImportMapper, self).price(record)
+        return super(ProductImportMapper, self).price(record)
 
 
 @magento
@@ -64,8 +65,8 @@ class ProductPriceExporter(MagentoBaseExporter):
     def _get_price(self, pricelist_id):
         """ Return the raw OpenERP data for ``self.binding_id`` """
         if pricelist_id is None:
-            return False  # a False value will set the 'Use default value'
-                          # in Magento
+            # a False value will set the 'Use default value' in Magento
+            return False
         with self.session.change_context({'pricelist': pricelist_id}):
             return self.session.read(self.model._name,
                                      self.binding_id,
@@ -145,6 +146,7 @@ def product_price_changed(session, model_name, record_id, fields=None):
 
 
 @job
+@related_action(action=unwrap_binding)
 def export_product_price(session, model_name, record_id, website_id=None):
     """ Export the price of a product. """
     product_bind = session.browse(model_name, record_id)

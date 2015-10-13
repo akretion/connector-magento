@@ -25,8 +25,12 @@ from openerp.osv import orm, fields
 from openerp.addons.connector.unit.mapper import (mapping,
                                                   ImportMapper
                                                   )
-from openerp.addons.connector.exception import IDMissingInBackend
-from .unit.backend_adapter import GenericAdapter
+from openerp.addons.connector.exception import (IDMissingInBackend,
+                                                MappingError,
+                                                )
+from .unit.backend_adapter import (GenericAdapter,
+                                   MAGENTO_DATETIME_FORMAT,
+                                   )
 from .unit.import_synchronizer import (DelayedBatchImport,
                                        MagentoImportSynchronizer,
                                        TranslationImporter,
@@ -51,12 +55,12 @@ class magento_product_category(orm.Model):
         'description': fields.text('Description', translate=True),
         'magento_parent_id': fields.many2one(
             'magento.product.category',
-             string='Magento Parent Category',
-             ondelete='cascade'),
+            string='Magento Parent Category',
+            ondelete='cascade'),
         'magento_child_ids': fields.one2many(
             'magento.product.category',
-             'magento_parent_id',
-             string='Magento Child Categories'),
+            'magento_parent_id',
+            string='Magento Child Categories'),
     }
 
     _sql_constraints = [
@@ -74,11 +78,20 @@ class product_category(orm.Model):
             string="Magento Bindings"),
     }
 
+    def copy_data(self, cr, uid, id, default=None, context=None):
+        if default is None:
+            default = {}
+        default['magento_bind_ids'] = False
+        return super(product_category, self).copy_data(cr, uid, id,
+                                                       default=default,
+                                                       context=context)
+
 
 @magento
 class ProductCategoryAdapter(GenericAdapter):
     _model_name = 'magento.product.category'
     _magento_model = 'catalog_category'
+    _admin_path = '/{model}/index/'
 
     def _call(self, method, arguments):
         try:
@@ -91,8 +104,8 @@ class ProductCategoryAdapter(GenericAdapter):
             else:
                 raise
 
-    def search(self, filters=None, from_date=None):
-        """ Search records according to some criterias and returns a
+    def search(self, filters=None, from_date=None, to_date=None):
+        """ Search records according to some criteria and return a
         list of ids
 
         :rtype: list
@@ -100,11 +113,15 @@ class ProductCategoryAdapter(GenericAdapter):
         if filters is None:
             filters = {}
 
+        dt_fmt = MAGENTO_DATETIME_FORMAT
         if from_date is not None:
+            filters.setdefault('updated_at', {})
             # updated_at include the created records
-            filters['updated_at'] = {'from': from_date.strftime('%Y/%m/%d %H:%M:%S')}
+            filters['updated_at']['from'] = from_date.strftime(dt_fmt)
+        if to_date is not None:
+            filters.setdefault('updated_at', {})
+            filters['updated_at']['to'] = to_date.strftime(dt_fmt)
 
-        # the search method is on ol_customer instead of customer
         return self._call('oerp_catalog_category.search',
                           [filters] if filters else [{}])
 
@@ -134,6 +151,26 @@ class ProductCategoryAdapter(GenericAdapter):
                           [parent_id, storeview_id])
         return filter_ids(tree)
 
+    def move(self, categ_id, parent_id, after_categ_id=None):
+        return self._call('%s.move' % self._magento_model,
+                          [categ_id, parent_id, after_categ_id])
+
+    def get_assigned_product(self, categ_id):
+        return self._call('%s.assignedProducts' % self._magento_model,
+                          [categ_id])
+
+    def assign_product(self, categ_id, product_id, position=0):
+        return self._call('%s.assignProduct' % self._magento_model,
+                          [categ_id, product_id, position, 'id'])
+
+    def update_product(self, categ_id, product_id, position=0):
+        return self._call('%s.updateProduct' % self._magento_model,
+                          [categ_id, product_id, position, 'id'])
+
+    def remove_product(self, categ_id, product_id):
+        return self._call('%s.removeProduct' % self._magento_model,
+                          [categ_id, product_id, 'id'])
+
 
 @magento
 class ProductCategoryBatchImport(DelayedBatchImport):
@@ -148,17 +185,21 @@ class ProductCategoryBatchImport(DelayedBatchImport):
     def _import_record(self, magento_id, priority=None):
         """ Delay a job for the import """
         super(ProductCategoryBatchImport, self)._import_record(
-                magento_id, priority=priority)
+            magento_id, priority=priority)
 
     def run(self, filters=None):
         """ Run the synchronization """
         from_date = filters.pop('from_date', None)
-        if from_date is not None:
-            updated_ids = self.backend_adapter.search(filters, from_date)
+        to_date = filters.pop('to_date', None)
+        if from_date or to_date:
+            updated_ids = self.backend_adapter.search(filters,
+                                                      from_date=from_date,
+                                                      to_date=to_date)
         else:
             updated_ids = None
 
         base_priority = 10
+
         def import_nodes(tree, level=0):
             for node_id, children in tree.iteritems():
                 # By changing the priority, the top level category has
@@ -198,7 +239,7 @@ class ProductCategoryImport(MagentoImportSynchronizer):
     def _after_import(self, binding_id):
         """ Hook called at the end of the import """
         translation_importer = self.get_connector_unit_for_model(
-                TranslationImporter, self.model._name)
+            TranslationImporter, self.model._name)
         translation_importer.run(self.magento_id, binding_id)
 
 
@@ -207,8 +248,8 @@ class ProductCategoryImportMapper(ImportMapper):
     _model_name = 'magento.product.category'
 
     direct = [
-            ('description', 'description'),
-            ]
+        ('description', 'description'),
+    ]
 
     @mapping
     def name(self, record):

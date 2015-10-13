@@ -21,7 +21,7 @@
 ##############################################################################
 
 {'name': 'Magento Connector',
- 'version': '2.0.0',
+ 'version': '2.5.0',
  'category': 'Connector',
  'depends': ['account',
              'product',
@@ -33,9 +33,9 @@
  'external_dependencies': {
      'python': ['magento'],
  },
- 'author': 'MagentoERPconnect Core Editors',
+ 'author': "Camptocamp,Akretion,Odoo Community Association (OCA)",
  'license': 'AGPL-3',
- 'website': 'https://launchpad.net/magentoerpconnect',
+ 'website': 'http://www.odoo-magento-connector.com',
  'description': """
 Magento Connector
 =================
@@ -46,9 +46,9 @@ build on top of the `connector`_ framework. It is is structured so that
 it can be extended or modified easily from separate addons, a factor of
 success when the implementations of Magento vary a lot.
 
-Magento OpenERP Connector is mainly developed by the Magentoerpconnect Core
+Magento OpenERP Connector is mainly developed by the Connector Core
 Editors, these being Camptocamp_ and Akretion_. The `source is on
-launchpad`_.
+GitHub`_.
 
 This connector is designed to have a strong and efficient core, with the
 ability to extend it with extension modules or local customizations.
@@ -107,11 +107,11 @@ Available extensions:
         Export new partners on Magento, not complete.
 
 
-.. _connector: https://code.launchpad.net/openerp-connector
-.. _connector_ecommerce: https://code.launchpad.net/openerp-connector
+.. _connector: https://github.com/OCA/connector
+.. _connector_ecommerce: https://github.com/OCA/connector-ecommerce
 .. _Camptocamp: http://www.camptocamp.com
 .. _Akretion: http://www.akretion.com
-.. _`source is on launchpad`: https://launchpad.net/magentoerpconnect
+.. _`source is on GitHub`: https://github.com/OCA/connector-magento
 
 """,
  'images': ['images/magento_backend.png',
@@ -132,7 +132,8 @@ Available extensions:
           'delivery_view.xml',
           'stock_view.xml',
           'security/ir.model.access.csv',
+          'payment_invoice.xml',
           ],
  'installable': True,
  'application': True,
-}
+ }

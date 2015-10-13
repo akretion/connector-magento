@@ -28,9 +28,9 @@
              'product_links',
              'product_images',
              ],
- 'author': 'MagentoERPconnect Core Editors',
+ 'author': "Odoo Community Association (OCA)",
  'license': 'AGPL-3',
- 'website': 'https://launchpad.net/magentoerpconnect',
+ 'website': 'http://www.odoo-magento-connector.com',
  'description': """
 Magento Connector - Catalog
 ===========================
@@ -45,7 +45,6 @@ Extension for **Magento Connector**, add management of the product's catalog:
  'images': [],
  'demo': [],
  'data': [],
- 'installable': True,
+ 'installable': False,
  'application': False,
-}
-
+ }

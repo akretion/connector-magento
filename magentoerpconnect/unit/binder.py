@@ -41,31 +41,32 @@ class MagentoModelBinder(MagentoBinder):
     fields belonging to the Magento instance.
     """
     _model_name = [
-            'magento.website',
-            'magento.store',
-            'magento.storeview',
-            'magento.res.partner',
-            'magento.address',
-            'magento.res.partner.category',
-            'magento.product.category',
-            'magento.product.product',
-            'magento.stock.picking.out',
-            'magento.sale.order',
-            'magento.sale.order.line',
-            'magento.account.invoice',
-        ]
+        'magento.website',
+        'magento.store',
+        'magento.storeview',
+        'magento.res.partner',
+        'magento.address',
+        'magento.res.partner.category',
+        'magento.product.category',
+        'magento.product.product',
+        'magento.stock.picking.out',
+        'magento.sale.order',
+        'magento.sale.order.line',
+        'magento.account.invoice',
+    ]
 
     def to_openerp(self, external_id, unwrap=False):
         """ Give the OpenERP ID for an external ID
 
         :param external_id: external ID for which we want the OpenERP ID
-        :param unwrap: if True, returns the openerp_id of the magento_xxxx record,
-                       else return the id (binding id) of that record
+        :param unwrap: if True, returns the openerp_id of the magento_xxxx
+                       record, else return the id (binding id) of that record
         :return: a record ID, depending on the value of unwrap,
                  or None if the external_id is not mapped
         :rtype: int
         """
-        binding_ids = self.session.search(
+        with self.session.change_context({'active_test': False}):
+            binding_ids = self.session.search(
                 self.model._name,
                 [('magento_id', '=', str(external_id)),
                  ('backend_id', '=', self.backend_record.id)])
@@ -80,14 +81,29 @@ class MagentoModelBinder(MagentoBinder):
         else:
             return binding_id
 
-    def to_backend(self, binding_id):
+    def to_backend(self, record_id, wrap=False):
         """ Give the external ID for an OpenERP ID
 
-        :param binding_id: OpenERP ID for which we want the external id
+        :param record_id: OpenERP ID for which we want the external id
+        :param wrap: if False, record_id is the ID of the binding,
+            if True, record_id is the ID of the normal record, the
+            method will search the corresponding binding and returns
+            the backend id of the binding
         :return: backend identifier of the record
         """
+        if wrap:
+            with self.session.change_context({'active_test': False}):
+                erp_id = self.session.search(
+                    self.model._name,
+                    [('openerp_id', '=', record_id),
+                     ('backend_id', '=', self.backend_record.id)
+                     ])
+            if erp_id:
+                record_id = erp_id[0]
+            else:
+                return None
         magento_record = self.session.read(self.model._name,
-                                           binding_id,
+                                           record_id,
                                            ['magento_id'])
         assert magento_record
         return magento_record['magento_id']
@@ -104,6 +120,12 @@ class MagentoModelBinder(MagentoBinder):
         context = self.session.context.copy()
         context['connector_no_export'] = True
         now_fmt = datetime.now().strftime(DEFAULT_SERVER_DATETIME_FORMAT)
+        # the external ID can be 0 on Magento! Prevent False values
+        # like False, None, or "", but not 0.
+        assert (external_id or external_id == 0) and binding_id, (
+            "external_id or binding_id missing, "
+            "got: %s, %s" % (external_id, binding_id)
+        )
         self.environment.model.write(
             self.session.cr,
             self.session.uid,
@@ -111,3 +133,36 @@ class MagentoModelBinder(MagentoBinder):
             {'magento_id': str(external_id),
              'sync_date': now_fmt},
             context=context)
+
+    def unwrap_binding(self, binding_id, browse=False):
+        """ For a binding record, gives the normal record.
+
+        Example: when called with a ``magento.product.product`` id,
+        it will return the corresponding ``product.product`` id.
+
+        :param browse: when True, returns a browse_record instance
+                       rather than an ID
+        """
+        binding = self.session.read(self.model._name, binding_id,
+                                    ['openerp_id'])
+        openerp_id = binding['openerp_id'][0]
+        if browse:
+            return self.session.browse(self.unwrap_model(),
+                                       openerp_id)
+        return openerp_id
+
+    def unwrap_model(self):
+        """ For a binding model, gives the name of the normal model.
+
+        Example: when called on a binder for ``magento.product.product``,
+        it will return ``product.product``.
+
+        This binder assumes that the normal model lays in ``openerp_id`` since
+        this is the field we use in the ``_inherits`` bindings.
+        """
+        try:
+            column = self.model._columns['openerp_id']
+        except KeyError:
+            raise ValueError('Cannot unwrap model %s, because it has '
+                             'no openerp_id field' % self.model._name)
+        return column._obj

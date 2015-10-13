@@ -10,8 +10,12 @@ Installation Guide
 Installation
 ************
 
-The installation steps assume that you already have a working OpenERP
-setup with all the OpenERP pre-requisites.
+The installation steps assume that you already have a functioning OpenERP server.
+
+If you are a developer, you may want to install the Connector using our
+buildout configuration, head over :ref:`installation-with-buildout`.
+
+For the manual installation, just stay there.
 
 Requirements on both servers
 ============================
@@ -22,15 +26,24 @@ OpenERP to ensure a correct synchronization between them
 OpenERP
 =======
 
-Download the branches where you installed OpenERP::
+Clone the repositories below in the path where you chosed to store the addons::
 
-    $ bzr branch lp:openerp-connector/7.0 connector
-    $ bzr branch lp:openerp-connector/7.0-e-commerce-addons e-commerce-addons
-    $ bzr branch lp:openerp-connector/7.0-magentoerpconnect magentoerpconnect
-    $ bzr branch lp:openerp-product-attributes/7.0 openerp-product-attributes
+    $ git clone git@github.com:OCA/connector.git -b 7.0
+    $ git clone git@github.com:OCA/connector-ecommerce.git -b 7.0
+    $ git clone git@github.com:OCA/connector-magento.git -b 7.0
+    $ git clone git@github.com:OCA/e-commerce.git -b 7.0
+    $ git clone git@github.com:OCA/product-attribute.git -b 7.0
+    $ git clone git@github.com:OCA/sale-workflow.git -b 7.0
+
+.. important:: Keep the git branches entire. Do not copy-paste the modules
+               in another directory.
 
 Add the branches in the addons path, either using the server command
 line or adding them in the OpenERP server configuration file.
+
+Example using the command line argument::
+
+    $ /path/to/openerp-server --addons-path /path/to/connector,/path/to/connector-ecommerce,/path/to/connector-magento,/path/to/e-commerce,/path/to/product-attribute,/path/to/sale-workflow
 
 You also need to install the ``magento`` Python package.
 So install it with either pip or either easy_install::
@@ -56,7 +69,7 @@ For the time being, the Magento extension originally built by OpenLabs
 is still used  by the connector. But the version published on `Magento
 Connect` is outdated.
 
-Download the following branch and install it in Magento::
+Download the following ``Bazaar`` branch and install it in Magento::
 
     $ bzr branch lp:magentoerpconnect/magento-module-oerp6.x-stable magento-module
 
@@ -68,6 +81,12 @@ In order to install it:
    `magento_root/app/etc/modules`.
 #. Flush the Magento cache from the admin panel or by removing everything in
    `magento_root/var/cache`
+
+
+.. important:: Please check if you have installed Magento on PHP with a *5.4.x** version.
+               Magento is **not compatible** with this version and would prevent the API to
+               behave normally. In that case, you must retrograde to PHP 5.3.x or apply the
+               patch provided by Magento (see http://magento.com/resources/system-requirements)
 
 Configuring the Magento web-services
 ====================================

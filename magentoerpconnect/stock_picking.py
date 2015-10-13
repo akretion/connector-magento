@@ -23,7 +23,7 @@ import logging
 import xmlrpclib
 from openerp.osv import orm, fields
 from openerp.tools.translate import _
-from openerp.addons.connector.queue.job import job
+from openerp.addons.connector.queue.job import job, related_action
 from openerp.addons.connector.event import on_record_create
 from openerp.addons.connector.exception import NothingToDoJob
 from openerp.addons.connector.unit.synchronizer import ExportSynchronizer
@@ -33,6 +33,7 @@ from .unit.backend_adapter import GenericAdapter
 from .connector import get_environment
 from .backend import magento
 from .stock_tracking import export_tracking_number
+from .related_action import unwrap_binding
 
 _logger = logging.getLogger(__name__)
 
@@ -72,6 +73,14 @@ class stock_picking(orm.Model):
             string="Magento Bindings"),
     }
 
+    def copy_data(self, cr, uid, id, default=None, context=None):
+        if default is None:
+            default = {}
+        default['magento_bind_ids'] = False
+        return super(stock_picking, self).copy_data(cr, uid, id,
+                                                    default=default,
+                                                    context=context)
+
 
 # Seems to be so buggy, if I put magento_bind_ids
 # only in stock.picking.out, I cannot read it from the browse
@@ -86,11 +95,21 @@ class stock_picking_out(orm.Model):
             string="Magento Bindings"),
     }
 
+    # Copy also has an issue on stock.picking.out.
+    def copy_data(self, cr, uid, id, default=None, context=None):
+        if default is None:
+            default = {}
+        default['magento_bind_ids'] = False
+        return super(stock_picking_out, self).copy_data(cr, uid, id,
+                                                        default=default,
+                                                        context=context)
+
 
 @magento
 class StockPickingAdapter(GenericAdapter):
     _model_name = 'magento.stock.picking.out'
     _magento_model = 'sales_order_shipment'
+    _admin_path = 'sales_shipment/view/shipment_id/{id}'
 
     def _call(self, method, arguments):
         try:
@@ -124,11 +143,11 @@ class StockPickingAdapter(GenericAdapter):
     def get_carriers(self, magento_id):
         """ Get the list of carrier codes allowed for the shipping.
 
-        :param magento_id: shipment increment id
+        :param magento_id: order increment id
         :rtype: list
         """
         return self._call('%s.getCarriers' % self._magento_model,
-                          [int(magento_id)])
+                          [magento_id])
 
 
 @magento
@@ -160,9 +179,11 @@ class MagentoPickingExport(ExportSynchronizer):
             sale_line = line.sale_line_id
             if not sale_line.magento_bind_ids:
                 continue
-            magento_sale_line = next((line for line in sale_line.magento_bind_ids
-                                      if line.backend_id.id == picking.backend_id.id),
-                                     None)
+            magento_sale_line = next(
+                (line for line in sale_line.magento_bind_ids
+                 if line.backend_id.id == picking.backend_id.id),
+                None
+            )
             if not magento_sale_line:
                 continue
             item_id = magento_sale_line.magento_id
@@ -186,6 +207,8 @@ class MagentoPickingExport(ExportSynchronizer):
         Export the picking to Magento
         """
         picking = self.session.browse(self.model._name, binding_id)
+        if picking.magento_id:
+            return _('Already exported')
         picking_method = picking.picking_method
         if picking_method == 'complete':
             args = self._get_args(picking)
@@ -193,7 +216,8 @@ class MagentoPickingExport(ExportSynchronizer):
             lines_info = self._get_lines_info(picking)
             if not lines_info:
                 raise NothingToDoJob(_('Canceled: the delivery order does not '
-                                       'contain lines from the original sale order.'))
+                                       'contain lines from the original '
+                                       'sale order.'))
             args = self._get_args(picking, lines_info)
         else:
             raise ValueError("Wrong value for picking_method, authorized "
@@ -203,7 +227,8 @@ class MagentoPickingExport(ExportSynchronizer):
             magento_id = self.backend_adapter.create(*args)
         except xmlrpclib.Fault as err:
             # When the shipping is already created on Magento, it returns:
-            # <Fault 102: u"Impossible de faire l\'exp\xe9dition de la commande.">
+            # <Fault 102: u"Impossible de faire
+            # l\'exp\xe9dition de la commande.">
             if err.faultCode == 102:
                 raise NothingToDoJob('Canceled: the delivery order already '
                                      'exists on Magento (fault 102).')
@@ -211,6 +236,9 @@ class MagentoPickingExport(ExportSynchronizer):
                 raise
         else:
             self.binder.bind(magento_id, binding_id)
+            # ensure that we store the external ID
+            if not self.session.context.get('__test_no_commit'):
+                self.session.commit()
 
 
 @on_picking_out_done
@@ -235,19 +263,35 @@ def picking_out_done(session, model_name, record_id, picking_method):
 
 
 @on_record_create(model_names='magento.stock.picking.out')
-def delay_export_picking_out(session, model_name, record_id):
-    export_picking_done.delay(session, model_name, record_id)
+def delay_export_picking_out(session, model_name, record_id, vals):
+    binding = session.browse(model_name, record_id)
+    # tracking number is sent when:
+    # * the picking is exported and the tracking number was already
+    #   there before the picking was done OR
+    # * the tracking number is added after the picking is done
+    # We have to keep the initial state of whether we had an
+    # tracking number in the job kwargs, because if we read the
+    # picking at the time of execution of the job, a tracking could
+    # have been added and it would be exported twice.
+    with_tracking = bool(binding.carrier_tracking_ref)
+    export_picking_done.delay(session, model_name, record_id,
+                              with_tracking=with_tracking)
 
 
 @job
-def export_picking_done(session, model_name, record_id):
+@related_action(action=unwrap_binding)
+def export_picking_done(session, model_name, record_id, with_tracking=True):
     """ Export a complete or partial delivery order. """
+    # with_tracking is True to keep a backward compatibility (jobs that
+    # are pending and miss this argument will behave the same, but
+    # it should be called with True only if the carrier_tracking_ref
+    # is True when the job is created.
     picking = session.browse(model_name, record_id)
     backend_id = picking.backend_id.id
     env = get_environment(session, model_name, backend_id)
     picking_exporter = env.get_connector_unit(MagentoPickingExport)
     res = picking_exporter.run(record_id)
 
-    if picking.carrier_tracking_ref:
+    if with_tracking and picking.carrier_tracking_ref:
         export_tracking_number.delay(session, model_name, record_id)
     return res

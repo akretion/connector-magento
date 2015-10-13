@@ -21,12 +21,13 @@
 
 import logging
 from openerp.tools.translate import _
-from openerp.addons.connector.queue.job import job
-from openerp.addons.connector.exception import FailedJobError, NoExternalId
+from openerp.addons.connector.queue.job import job, related_action
+from openerp.addons.connector.exception import FailedJobError
 from openerp.addons.connector.unit.synchronizer import ExportSynchronizer
 from openerp.addons.connector_ecommerce.event import on_tracking_number_added
 from .connector import get_environment
 from .backend import magento
+from .related_action import unwrap_binding
 
 _logger = logging.getLogger(__name__)
 
@@ -60,7 +61,8 @@ class MagentoTrackingExport(ExportSynchronizer):
                                  "Resolution:\n"
                                  "* Add support of %(code)s in Magento\n"
                                  "* Or deactivate the export of tracking "
-                                 "numbers in the setup of the carrier %(name)s." %
+                                 "numbers in the setup of the carrier "
+                                 "%(name)s." %
                                  {'name': carrier.name,
                                   'allowed': allowed_carriers,
                                   'code': carrier.magento_carrier_code})
@@ -80,16 +82,30 @@ class MagentoTrackingExport(ExportSynchronizer):
         if not picking.carrier_tracking_ref:
             return _('No tracking number to send.')
 
-        magento_picking_id = picking.magento_id
-        if magento_picking_id is None:
-            raise NoExternalId("No value found for the picking ID on "
-                               "Magento side, the job will be retried later.")
+        sale_binding_id = picking.magento_order_id
+        if not sale_binding_id:
+            return FailedJobError("No sales order is linked with the picking "
+                                  "%s, can't export the tracking number." %
+                                  picking.name)
+
+        binder = self.get_binder_for_model()
+        magento_id = binder.to_backend(binding_id)
+        if not magento_id:
+            # avoid circular reference
+            from .stock_picking import MagentoPickingExport
+            picking_exporter = self.get_connector_unit_for_model(
+                MagentoPickingExport)
+            picking_exporter.run(binding_id)
+            magento_id = binder.to_backend(binding_id)
+        if not magento_id:
+            return FailedJobError("The delivery order %s has no Magento ID, "
+                                  "can't export the tracking number." %
+                                  picking.name)
 
         self._validate(picking)
-        self._check_allowed_carrier(picking, magento_picking_id)
+        self._check_allowed_carrier(picking, sale_binding_id.magento_id)
         tracking_args = self._get_tracking_args(picking)
-        self.backend_adapter.add_tracking_number(magento_picking_id,
-                                                 *tracking_args)
+        self.backend_adapter.add_tracking_number(magento_id, *tracking_args)
 
 
 @on_tracking_number_added
@@ -111,6 +127,7 @@ def delay_export_tracking_number(session, model_name, record_id):
 
 
 @job
+@related_action(action=unwrap_binding)
 def export_tracking_number(session, model_name, record_id):
     """ Export the tracking number of a delivery order. """
     picking = session.browse(model_name, record_id)

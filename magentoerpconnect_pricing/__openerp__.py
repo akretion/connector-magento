@@ -24,12 +24,12 @@
  'category': 'Connector',
  'depends': ['magentoerpconnect',
              ],
- 'author': 'MagentoERPconnect Core Editors',
+ 'author': "Camptocamp,Odoo Community Association (OCA)",
  'license': 'AGPL-3',
- 'website': 'https://launchpad.net/magentoerpconnect',
+ 'website': 'http://www.odoo-magento-connector.com',
  'description': """
 Magento Connector - Pricing
-===================================
+===========================
 
 Extension for **Magento Connector**.
 
@@ -42,4 +42,4 @@ are pushed to Magento.
           ],
  'installable': True,
  'application': False,
-}
+ }

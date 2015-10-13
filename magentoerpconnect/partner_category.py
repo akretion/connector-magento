@@ -40,6 +40,14 @@ class res_partner_category(orm.Model):
             readonly=True),
     }
 
+    def copy_data(self, cr, uid, id, default=None, context=None):
+        if default is None:
+            default = {}
+        default['magento_bind_ids'] = False
+        return super(res_partner_category, self).copy_data(cr, uid, id,
+                                                           default=default,
+                                                           context=context)
+
 
 class magento_res_partner_category(orm.Model):
     _name = 'magento.res.partner.category'
@@ -48,10 +56,10 @@ class magento_res_partner_category(orm.Model):
 
     _columns = {
         'openerp_id': fields.many2one('res.partner.category',
-                                       string='Partner Category',
-                                       required=True,
-                                       ondelete='cascade'),
-        #TODO : replace by a m2o when tax class will be implemented
+                                      string='Partner Category',
+                                      required=True,
+                                      ondelete='cascade'),
+        # TODO : replace by a m2o when tax class will be implemented
         'tax_class_id': fields.integer('Tax Class ID'),
     }
 
@@ -65,6 +73,7 @@ class magento_res_partner_category(orm.Model):
 class PartnerCategoryAdapter(GenericAdapter):
     _model_name = 'magento.res.partner.category'
     _magento_model = 'ol_customer_groups'
+    _admin_path = '/customer_group/edit/id/{id}'
 
     def search(self, filters=None):
         """ Search records according to some criterias
@@ -88,9 +97,9 @@ class PartnerCategoryImportMapper(ImportMapper):
     _model_name = 'magento.res.partner.category'
 
     direct = [
-            ('customer_group_code', 'name'),
-            ('tax_class_id', 'tax_class_id'),
-            ]
+        ('customer_group_code', 'name'),
+        ('tax_class_id', 'tax_class_id'),
+    ]
 
     @mapping
     def magento_id(self, record):

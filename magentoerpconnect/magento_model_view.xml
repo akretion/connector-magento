@@ -14,17 +14,32 @@
                         string="Synchronize Metadata"/>
                     </header>
                     <sheet>
+                        <label for="name" class="oe_edit_only"/>
                         <h1>
-                            <field name="name" class="oe_inline"/>
+                            <field name="name" class="oe_inline" />
                         </h1>
                         <group name="magento" string="Magento Configuration">
-                            <group colspan="4" col="4">
-                                <field name="version" colspan="4"/>
-                                <field name="location" placeholder="e.g. http://my.magento.com"
-                                    colspan="4"/>
-                                <field name="username" colspan="2"/>
-                                <field name="password" colspan="2"/>
-                            </group>
+                            <notebook>
+                                <page string="API" name="api">
+                                    <group colspan="4" col="4">
+                                        <field name="version" colspan="4"/>
+                                        <field name="location" placeholder="e.g. http://my.magento.com"
+                                            colspan="2"/>
+                                        <field name="use_custom_api_path" colspan="2"/>
+                                        <field name="username" colspan="2"/>
+                                        <field name="password" colspan="2"/>
+                                    </group>
+                                </page>
+                                <page string="HTTP Authentication" name="auth" colspan="4" col="4">
+                                    <group colspan="4" col="4">
+                                        <field name="use_auth_basic" colspan="4"/>
+                                        <field name="auth_basic_username" colspan="2"
+                                              attrs="{'invisible': [('use_auth_basic', '=', False)], 'required': [('use_auth_basic', '=', True)]}"/>
+                                        <field name="auth_basic_password" colspan="2"
+                                              attrs="{'invisible': [('use_auth_basic', '=', False)], 'required': [('use_auth_basic', '=', True)]}"/>
+                                    </group>
+                                </page>
+                            </notebook>
                         </group>
                         <group name="main_configuration" string="Main Configuration">
                             <field name="warehouse_id"/>
@@ -108,8 +123,10 @@
 
                             <page name="advanced_configuration" string="Advanced Configuration">
                                 <group>
+                                    <field name="admin_location" placeholder="e.g. http://my.magento.com/admin"/>
                                     <field name="default_lang_id" widget="selection"/>
                                     <field name="default_category_id"/>
+                                    <field name="sale_prefix" placeholder="mag-" />
                                     <field name="product_stock_field_id" widget="selection"
                                         domain="[('model', 'in', ['product.product', 'product.template']), ('ttype', '=', 'float')]"/>
                                 </group>
@@ -233,6 +250,7 @@
                         <group string="Options">
                             <field name="send_picking_done_mail"/>
                             <field name="send_invoice_paid_mail"/>
+                            <field name="create_invoice_on"/>
                         </group>
 
                         <notebook>
@@ -284,10 +302,18 @@
                             <field name="store_id"/>
                             <field name="sort_order"/>
                             <field name="enabled"/>
-			    <field name="no_sales_order_sync"/>
+                            <field name="no_sales_order_sync"/>
                         </group>
                         <group string="Options">
                             <field name="lang_id" widget="selection"/>
+                            <field name="catalog_price_tax_included"/>
+                            <p attrs="{'invisible': [('catalog_price_tax_included', '=', False)]}">
+                              This option should respect the same
+                              configuration as Magento.  Pay
+                              attention to the taxes on the products,
+                              which should surely include prices when
+                              this option is activated.
+                            </p>
                         </group>
                         <notebook>
                             <page name="import" string="Imports">
@@ -323,7 +349,8 @@
                     <field name="name"/>
                     <field name="code"/>
                     <field name="enabled"/>
-		    <field name="no_sales_order_sync"/>
+                    <field name="no_sales_order_sync"/>
+                    <field name="catalog_price_tax_included"/>
                     <field name="sort_order"/>
                     <field name="store_id"/>
                 </tree>

@@ -21,10 +21,10 @@
 ##############################################################################
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from openerp.osv import fields, orm
 from openerp.tools import DEFAULT_SERVER_DATETIME_FORMAT
-import openerp.addons.connector as connector
+from openerp.tools.translate import _
 from openerp.addons.connector.session import ConnectorSession
 from openerp.addons.connector.connector import ConnectorUnit
 from openerp.addons.connector.unit.mapper import (mapping,
@@ -44,6 +44,8 @@ from .connector import add_checkpoint
 
 _logger = logging.getLogger(__name__)
 
+IMPORT_DELTA_BUFFER = 30  # seconds
+
 
 class magento_backend(orm.Model):
     _name = 'magento.backend'
@@ -52,15 +54,24 @@ class magento_backend(orm.Model):
 
     _backend_type = 'magento'
 
-    def _select_versions(self, cr, uid, context=None):
-        """ Available versions
+    def select_versions(self, cr, uid, context=None):
+        """ Available versions in the backend.
 
-        Can be inherited to add custom versions.
+        Can be inherited to add custom versions.  Using this method
+        to add a version from an ``_inherit`` does not constrain
+        to redefine the ``version`` field in the ``_inherit`` model.
         """
         return [('1.7', '1.7')]
 
+    def _select_versions(self, cr, uid, context=None):
+        """ Available versions in the backend.
+
+        If you want to add a version, do not override this
+        method, but ``select_version``.
+        """
+        return self.select_versions(cr, uid, context=context)
+
     def _get_stock_field_id(self, cr, uid, context=None):
-        stock_field = 'virtual_available'
         field_ids = self.pool.get('ir.model.fields').search(
             cr, uid,
             [('model', '=', 'product.product'),
@@ -73,9 +84,40 @@ class magento_backend(orm.Model):
             _select_versions,
             string='Version',
             required=True),
-        'location': fields.char('Location'),
-        'username': fields.char('Username'),
-        'password': fields.char('Password'),
+        'location': fields.char(
+            'Location',
+            required=True,
+            help="Url to magento application"),
+        'admin_location': fields.char('Admin Location'),
+        'use_custom_api_path': fields.boolean(
+            'Custom Api Path',
+            help="The default API path is '/index.php/api/xmlrpc'. "
+                 "Check this box if you use a custom API path, in that case, "
+                 "the location has to be completed with the custom API path "),
+        'username': fields.char(
+            'Username',
+            help="Webservice user"),
+        'password': fields.char(
+            'Password',
+            help="Webservice password"),
+        'use_auth_basic': fields.boolean(
+            'Use HTTP Auth Basic',
+            help="Use a Basic Access Authentication for the API. "
+                 "The Magento server could be configured to restrict access "
+                 "using a HTTP authentication based on a username and "
+                 "a password."),
+        'auth_basic_username': fields.char(
+            'Basic Auth. Username',
+            help="Basic access authentication web server side username"),
+        'auth_basic_password': fields.char(
+            'Basic Auth. Password',
+            help="Basic access authentication web server side password"),
+        'sale_prefix': fields.char(
+            'Sale Prefix',
+            help="A prefix put before the name of imported sales orders.\n"
+                 "For instance, if the prefix is 'mag-', the sales "
+                 "order 100000692 in Magento, will be named 'mag-100000692' "
+                 "in OpenERP."),
         'warehouse_id': fields.many2one('stock.warehouse',
                                         'Warehouse',
                                         required=True,
@@ -89,7 +131,8 @@ class magento_backend(orm.Model):
             'Default Language',
             help="If a default language is selected, the records "
                  "will be imported in the translation of this language.\n"
-                 "Note that a similar configuration exists for each storeview."),
+                 "Note that a similar configuration exists "
+                 "for each storeview."),
         'default_category_id': fields.many2one(
             'product.category',
             string='Default Product Category',
@@ -97,9 +140,10 @@ class magento_backend(orm.Model):
                  'without a category will be linked to it.'),
 
         # add a field `auto_activate` -> activate a cron
-        'import_products_from_date': fields.datetime('Import products from date'),
-        'import_categories_from_date': fields.datetime('Import categories from date'),
-        'catalog_price_tax_included': fields.boolean('Prices include tax'),
+        'import_products_from_date': fields.datetime(
+            'Import products from date'),
+        'import_categories_from_date': fields.datetime(
+            'Import categories from date'),
         'product_stock_field_id': fields.many2one(
             'ir.model.fields',
             string='Stock Field',
@@ -116,7 +160,14 @@ class magento_backend(orm.Model):
 
     _defaults = {
         'product_stock_field_id': _get_stock_field_id,
+        'use_custom_api_path': False,
+        'use_auth_basic': False,
     }
+
+    _sql_constraints = [
+        ('sale_prefix_uniq', 'unique(sale_prefix)',
+         "A backend with the same sale prefix already exists")
+    ]
 
     def check_magento_structure(self, cr, uid, ids, context=None):
         """ Used in each data import.
@@ -163,7 +214,8 @@ class magento_backend(orm.Model):
         storeview_ids = storeview_obj.search(cr, uid,
                                              [('backend_id', 'in', ids)],
                                              context=context)
-        storeviews = storeview_obj.browse(cr, uid, storeview_ids, context=context)
+        storeviews = storeview_obj.browse(cr, uid, storeview_ids,
+                                          context=context)
         for storeview in storeviews:
             storeview.import_sale_orders()
         return True
@@ -179,12 +231,13 @@ class magento_backend(orm.Model):
 
         return True
 
-    def _import_from_date(self, cr, uid, ids, model, from_date_field, context=None):
+    def _import_from_date(self, cr, uid, ids, model, from_date_field,
+                          context=None):
         if not hasattr(ids, '__iter__'):
             ids = [ids]
         self.check_magento_structure(cr, uid, ids, context=context)
         session = ConnectorSession(cr, uid, context=context)
-        import_start_time = datetime.now().strftime(DEFAULT_SERVER_DATETIME_FORMAT)
+        import_start_time = datetime.now()
         for backend in self.browse(cr, uid, ids, context=context):
             from_date = getattr(backend, from_date_field)
             if from_date:
@@ -193,9 +246,21 @@ class magento_backend(orm.Model):
             else:
                 from_date = None
             import_batch.delay(session, model,
-                               backend.id, filters={'from_date': from_date})
-        self.write(cr, uid, ids,
-                   {from_date_field: import_start_time})
+                               backend.id,
+                               filters={'from_date': from_date,
+                                        'to_date': import_start_time})
+        # Records from Magento are imported based on their `created_at`
+        # date.  This date is set on Magento at the beginning of a
+        # transaction, so if the import is run between the beginning and
+        # the end of a transaction, the import of a record may be
+        # missed.  That's why we add a small buffer back in time where
+        # the eventually missed records will be retrieved.  This also
+        # means that we'll have jobs that import twice the same records,
+        # but this is not a big deal because they will be skipped when
+        # the last `sync_date` is the same.
+        next_time = import_start_time - timedelta(seconds=IMPORT_DELTA_BUFFER)
+        next_time = next_time.strftime(DEFAULT_SERVER_DATETIME_FORMAT)
+        self.write(cr, uid, ids, {from_date_field: next_time}, context=context)
 
     def import_product_categories(self, cr, uid, ids, context=None):
         self._import_from_date(cr, uid, ids, 'magento.product.category',
@@ -207,13 +272,19 @@ class magento_backend(orm.Model):
                                'import_products_from_date', context=context)
         return True
 
+    def _domain_for_update_product_stock_qty(self, cr, uid, ids, context=None):
+        return [
+            ('backend_id', 'in', ids),
+            ('type', '!=', 'service'),
+            ('no_stock_sync', '=', False), ]
+
     def update_product_stock_qty(self, cr, uid, ids, context=None):
         if not hasattr(ids, '__iter__'):
             ids = [ids]
         mag_product_obj = self.pool.get('magento.product.product')
-        product_ids = mag_product_obj.search(cr, uid,
-                                             [('backend_id', 'in', ids)],
-                                             context=context)
+        domain = self._domain_for_update_product_stock_qty(cr, uid, ids,
+                                                           context=context)
+        product_ids = mag_product_obj.search(cr, uid, domain, context=context)
         mag_product_obj.recompute_magento_qty(cr, uid, product_ids,
                                               context=context)
         return True
@@ -225,11 +296,13 @@ class magento_backend(orm.Model):
         if ids:
             callback(cr, uid, ids, context=context)
 
-    def _scheduler_import_sale_orders(self, cr, uid, domain=None, context=None):
+    def _scheduler_import_sale_orders(self, cr, uid, domain=None,
+                                      context=None):
         self._magento_backend(cr, uid, self.import_sale_orders,
                               domain=domain, context=context)
 
-    def _scheduler_import_customer_groups(self, cr, uid, domain=None, context=None):
+    def _scheduler_import_customer_groups(self, cr, uid, domain=None,
+                                          context=None):
         self._magento_backend(cr, uid, self.import_customer_groups,
                               domain=domain, context=context)
 
@@ -237,11 +310,18 @@ class magento_backend(orm.Model):
         self._magento_backend(cr, uid, self.import_partners,
                               domain=domain, context=context)
 
-    def _scheduler_import_product_categories(self, cr, uid, domain=None, context=None):
+    def _scheduler_import_product_categories(self, cr, uid, domain=None,
+                                             context=None):
         self._magento_backend(cr, uid, self.import_product_categories,
                               domain=domain, context=context)
 
-    def _scheduler_update_product_stock_qty(self, cr, uid, domain=None, context=None):
+    def _scheduler_import_product_product(self, cr, uid, domain=None,
+                                          context=None):
+        self._magento_backend(cr, uid, self.import_product_product,
+                              domain=domain, context=context)
+
+    def _scheduler_update_product_stock_qty(self, cr, uid,
+                                            domain=None, context=None):
         self._magento_backend(cr, uid, self.update_product_stock_qty,
                               domain=domain, context=context)
 
@@ -278,7 +358,8 @@ class magento_website(orm.Model):
             'website_id',
             string="Stores",
             readonly=True),
-        'import_partners_from_date': fields.datetime('Import partners from date'),
+        'import_partners_from_date': fields.datetime(
+            'Import partners from date'),
         'product_binding_ids': fields.many2many('magento.product.product',
                                                 string='Magento Products',
                                                 readonly=True),
@@ -293,7 +374,7 @@ class magento_website(orm.Model):
         if not hasattr(ids, '__iter__'):
             ids = [ids]
         session = ConnectorSession(cr, uid, context=context)
-        import_start_time = datetime.now().strftime(DEFAULT_SERVER_DATETIME_FORMAT)
+        import_start_time = datetime.now()
         for website in self.browse(cr, uid, ids, context=context):
             backend_id = website.backend_id.id
             if website.import_partners_from_date:
@@ -305,9 +386,21 @@ class magento_website(orm.Model):
             partner_import_batch.delay(
                 session, 'magento.res.partner', backend_id,
                 {'magento_website_id': website.magento_id,
-                    'from_date': from_date})
-        self.write(cr, uid, ids,
-                   {'import_partners_from_date': import_start_time})
+                 'from_date': from_date,
+                 'to_date': import_start_time})
+        # Records from Magento are imported based on their `created_at`
+        # date.  This date is set on Magento at the beginning of a
+        # transaction, so if the import is run between the beginning and
+        # the end of a transaction, the import of a record may be
+        # missed.  That's why we add a small buffer back in time where
+        # the eventually missed records will be retrieved.  This also
+        # means that we'll have jobs that import twice the same records,
+        # but this is not a big deal because they will be skipped when
+        # the last `sync_date` is the same.
+        next_time = import_start_time - timedelta(seconds=IMPORT_DELTA_BUFFER)
+        next_time = next_time.strftime(DEFAULT_SERVER_DATETIME_FORMAT)
+        self.write(cr, uid, ids, {'import_partners_from_date': next_time},
+                   context=context)
         return True
 
 
@@ -345,12 +438,11 @@ class magento_store(orm.Model):
             relation='magento.backend',
             string='Magento Backend',
             store={
-                'magento.store':
-                    (lambda self, cr, uid, ids, c=None:
-                        ids, ['website_id'], 10),
-                'magento.website':
-                    (_get_store_from_website, ['backend_id'], 20),
-                  },
+                'magento.store': (lambda self, cr, uid, ids, c=None: ids,
+                                  ['website_id'], 10),
+                'magento.website': (_get_store_from_website,
+                                    ['backend_id'], 20),
+            },
             readonly=True),
         'storeview_ids': fields.one2many(
             'magento.storeview',
@@ -362,9 +454,23 @@ class magento_store(orm.Model):
             help="Does the picking export/creation should send "
                  "an email notification on Magento side?"),
         'send_invoice_paid_mail': fields.boolean(
-            'Send email notification on invoice paid',
+            'Send email notification on invoice validated/paid',
             help="Does the invoice export/creation should send "
                  "an email notification on Magento side?"),
+        'create_invoice_on': fields.selection(
+            [('open', 'Validate'),
+             ('paid', 'Paid')],
+            'Create invoice on action',
+            required=True,
+            help="Should the invoice be created in Magento "
+                 "when it is validated or when it is paid in OpenERP?\n"
+                 "This only takes effect if the sales order's related "
+                 "payment method is not giving an option for this by "
+                 "itself. (See Payment Methods)"),
+    }
+
+    _defaults = {
+        'create_invoice_on': 'paid',
     }
 
     _sql_constraints = [
@@ -382,6 +488,14 @@ class sale_shop(orm.Model):
             string='Magento Bindings',
             readonly=True),
     }
+
+    def copy_data(self, cr, uid, id, default=None, context=None):
+        if default is None:
+            default = {}
+        default['magento_bind_ids'] = False
+        return super(sale_shop, self).copy_data(cr, uid, id,
+                                                default=default,
+                                                context=context)
 
 
 # TODO: migrate from magerp.storeviews
@@ -411,10 +525,11 @@ class magento_storeview(orm.Model):
             'Import sale orders from date',
             help='do not consider non-imported sale orders before this date. '
                  'Leave empty to import all sale orders'),
-	'no_sales_order_sync': fields.boolean(
+        'no_sales_order_sync': fields.boolean(
             'No Sales Order Synchronization',
             help='Check if the storeview is active in Magento '
                  'but its sales orders should not be imported.'),
+        'catalog_price_tax_included': fields.boolean('Prices include tax'),
     }
 
     _defaults = {
@@ -428,9 +543,9 @@ class magento_storeview(orm.Model):
 
     def import_sale_orders(self, cr, uid, ids, context=None):
         session = ConnectorSession(cr, uid, context=context)
-        import_start_time = datetime.now().strftime(DEFAULT_SERVER_DATETIME_FORMAT)
+        import_start_time = datetime.now()
         for storeview in self.browse(cr, uid, ids, context=context):
-	    if storeview.no_sales_order_sync:
+            if storeview.no_sales_order_sync:
                 _logger.debug("The storeview '%s' is active in Magento "
                               "but its sales orders should not be imported." %
                               storeview.name)
@@ -438,8 +553,8 @@ class magento_storeview(orm.Model):
             backend_id = storeview.backend_id.id
             if storeview.import_orders_from_date:
                 from_date = datetime.strptime(
-                        storeview.import_orders_from_date,
-                        DEFAULT_SERVER_DATETIME_FORMAT)
+                    storeview.import_orders_from_date,
+                    DEFAULT_SERVER_DATETIME_FORMAT)
             else:
                 from_date = None
             sale_order_import_batch.delay(
@@ -447,9 +562,23 @@ class magento_storeview(orm.Model):
                 'magento.sale.order',
                 backend_id,
                 {'magento_storeview_id': storeview.magento_id,
-                 'from_date': from_date},
+                 'from_date': from_date,
+                 'to_date': import_start_time},
                 priority=1)  # executed as soon as possible
-        self.write(cr, uid, ids, {'import_orders_from_date': import_start_time})
+        # Records from Magento are imported based on their `created_at`
+        # date.  This date is set on Magento at the beginning of a
+        # transaction, so if the import is run between the beginning and
+        # the end of a transaction, the import of a record may be
+        # missed.  That's why we add a small buffer back in time where
+        # the eventually missed records will be retrieved.  This also
+        # means that we'll have jobs that import twice the same records,
+        # but this is not a big deal because the sales orders will be
+        # imported the first time and the jobs will be skipped on the
+        # subsequent imports
+        next_time = import_start_time - timedelta(seconds=IMPORT_DELTA_BUFFER)
+        next_time = next_time.strftime(DEFAULT_SERVER_DATETIME_FORMAT)
+        self.write(cr, uid, ids, {'import_orders_from_date': next_time},
+                   context=context)
         return True
 
 
@@ -457,18 +586,21 @@ class magento_storeview(orm.Model):
 class WebsiteAdapter(GenericAdapter):
     _model_name = 'magento.website'
     _magento_model = 'ol_websites'
+    _admin_path = 'system_store/editWebsite/website_id/{id}'
 
 
 @magento
 class StoreAdapter(GenericAdapter):
     _model_name = 'magento.store'
     _magento_model = 'ol_groups'
+    _admin_path = 'system_store/editGroup/group_id/{id}'
 
 
 @magento
 class StoreviewAdapter(GenericAdapter):
     _model_name = 'magento.storeview'
     _magento_model = 'ol_storeviews'
+    _admin_path = 'system_store/editStore/store_id/{id}'
 
 
 @magento
@@ -482,10 +614,10 @@ class MetadataBatchImport(DirectBatchImport):
     (that's also a mean to rapidly check the connectivity with Magento).
     """
     _model_name = [
-            'magento.website',
-            'magento.store',
-            'magento.storeview',
-            ]
+        'magento.website',
+        'magento.store',
+        'magento.storeview',
+    ]
 
 
 @magento

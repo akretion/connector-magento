@@ -24,7 +24,7 @@
  'category': 'Connector',
  'depends': ['magentoerpconnect',
              ],
- 'author': 'Camptocamp',
+ 'author': "Camptocamp,Odoo Community Association (OCA)",
  'license': 'AGPL-3',
  'description': """
 Magento Connector Customization Example
@@ -38,5 +38,4 @@ Example of customizations:
  'data': [],
  'installable': True,
  'application': False,
-}
-
+ }

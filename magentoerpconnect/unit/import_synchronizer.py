@@ -23,12 +23,13 @@ import logging
 from datetime import datetime
 from openerp.tools.translate import _
 from openerp.tools import DEFAULT_SERVER_DATETIME_FORMAT
-from openerp.addons.connector.queue.job import job
+from openerp.addons.connector.queue.job import job, related_action
 from openerp.addons.connector.connector import ConnectorUnit
 from openerp.addons.connector.unit.synchronizer import ImportSynchronizer
 from openerp.addons.connector.exception import IDMissingInBackend
 from ..backend import magento
 from ..connector import get_environment, add_checkpoint
+from ..related_action import link
 
 _logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ They should call the ``bind`` method if the binder even if the records
 are already bound, to update the last sync date.
 
 """
+
 
 class MagentoImportSynchronizer(ImportSynchronizer):
     """ Base importer for Magento """
@@ -68,15 +70,18 @@ class MagentoImportSynchronizer(ImportSynchronizer):
         """Return True if the import should be skipped because
         it is already up-to-date in OpenERP"""
         assert self.magento_record
+        if not self.magento_record.get('updated_at'):
+            return  # no update date on Magento, always import it.
         if not binding_id:
-            return
+            return  # it does not exist so it shoud not be skipped
         binding = self.session.browse(self.model._name, binding_id)
         sync = binding.sync_date
         if not sync:
             return
         fmt = DEFAULT_SERVER_DATETIME_FORMAT
         sync_date = datetime.strptime(sync, fmt)
-        magento_date = datetime.strptime(self.magento_record['updated_at'], fmt)
+        magento_date = datetime.strptime(self.magento_record['updated_at'],
+                                         fmt)
         # if the last synchronization date is greater than the last
         # update in magento, we skip the import.
         # Important: at the beginning of the exporters flows, we have to
@@ -85,14 +90,53 @@ class MagentoImportSynchronizer(ImportSynchronizer):
         # miss changes done in Magento
         return magento_date < sync_date
 
+    def _import_dependency(self, magento_id, binding_model,
+                           importer_class=None, always=False):
+        """ Import a dependency.
+
+        The importer class is a class or subclass of
+        :class:`MagentoImportSynchronizer`. A specific class can be defined.
+
+        :param magento_id: id of the related binding to import
+        :param binding_model: name of the binding model for the relation
+        :type binding_model: str | unicode
+        :param importer_cls: :class:`openerp.addons.connector.\
+                                     connector.ConnectorUnit`
+                             class or parent class to use for the export.
+                             By default: MagentoImportSynchronizer
+        :type importer_cls: :class:`openerp.addons.connector.\
+                                    connector.MetaConnectorUnit`
+        :param always: if True, the record is updated even if it already
+                       exists, note that it is still skipped if it has
+                       not been modified on Magento since the last
+                       update. When False, it will import it only when
+                       it does not yet exist.
+        :type always: boolean
+        """
+        if not magento_id:
+            return
+        if importer_class is None:
+            importer_class = MagentoImportSynchronizer
+        binder = self.get_binder_for_model(binding_model)
+        if always or binder.to_openerp(magento_id) is None:
+            importer = self.get_connector_unit_for_model(
+                importer_class, model=binding_model)
+            importer.run(magento_id)
+
     def _import_dependencies(self):
-        """ Import the dependencies for the record"""
+        """ Import the dependencies for the record
+
+        Import of dependencies can be done manually or by calling
+        :meth:`_import_dependency` for each dependency.
+        """
         return
 
     def _map_data(self):
-        """ Call the convert on the Mapper so the converted record can
-        be obtained using mapper.data or mapper.data_for_create"""
-        self.mapper.convert(self.magento_record)
+        """ Returns an instance of
+        :py:class:`~openerp.addons.connector.unit.mapper.MapRecord`
+
+        """
+        return self.mapper.map_record(self.magento_record)
 
     def _validate_data(self, data):
         """ Check if the values to import are correct
@@ -104,25 +148,44 @@ class MagentoImportSynchronizer(ImportSynchronizer):
         """
         return
 
+    def _must_skip(self):
+        """ Hook called right after we read the data from the backend.
+
+        If the method returns a message giving a reason for the
+        skipping, the import will be interrupted and the message
+        recorded in the job (if the import is called directly by the
+        job, not by dependencies).
+
+        If it returns None, the import will continue normally.
+
+        :returns: None | str | unicode
+        """
+        return
+
     def _get_binding_id(self):
         """Return the binding id from the magento id"""
         return self.binder.to_openerp(self.magento_id)
 
-    def _context(self):
-        context = self.session.context.copy()
-        context['connector_no_export'] = True
-        return context
+    def _create_data(self, map_record, **kwargs):
+        return map_record.values(for_create=True, **kwargs)
 
     def _create(self, data):
         """ Create the OpenERP record """
+        # special check on data before import
+        self._validate_data(data)
         with self.session.change_context({'connector_no_export': True}):
             binding_id = self.session.create(self.model._name, data)
         _logger.debug('%s %d created from magento %s',
                       self.model._name, binding_id, self.magento_id)
         return binding_id
 
+    def _update_data(self, map_record, **kwargs):
+        return map_record.values(**kwargs)
+
     def _update(self, binding_id, data):
         """ Update an OpenERP record """
+        # special check on data before import
+        self._validate_data(data)
         with self.session.change_context({'connector_no_export': True}):
             self.session.write(self.model._name, binding_id, data)
         _logger.debug('%s %d updated from magento %s',
@@ -144,25 +207,28 @@ class MagentoImportSynchronizer(ImportSynchronizer):
         except IDMissingInBackend:
             return _('Record does no longer exist in Magento')
 
+        skip = self._must_skip()
+        if skip:
+            return skip
+
+        binding_id = self._get_binding_id()
+
         #if not force and self._is_uptodate(binding_id):
         #    return _('Already up-to-date.')
         self._before_import()
 
         # import the missing linked resources
         self._import_dependencies()
-        self._map_data()
+
+        map_record = self._map_data()
 
         binding_id = self._get_binding_id()
 
         if binding_id:
-            record = self.mapper.data
-            # special check on data before import
-            self._validate_data(record)
+            record = self._update_data(map_record)
             self._update(binding_id, record)
         else:
-            record = self.mapper.data_for_create
-            # special check on data before import
-            self._validate_data(record)
+            record = self._create_data(map_record)
             binding_id = self._create(record)
 
         self.binder.bind(self.magento_id, binding_id)
@@ -219,9 +285,9 @@ class DelayedBatchImport(BatchImportSynchronizer):
 class SimpleRecordImport(MagentoImportSynchronizer):
     """ Import one Magento Website """
     _model_name = [
-            'magento.website',
-            'magento.res.partner.category',
-        ]
+        'magento.website',
+        'magento.res.partner.category',
+    ]
 
 
 @magento
@@ -240,12 +306,12 @@ class TranslationImporter(ImportSynchronizer):
         """ Return the raw Magento data for ``self.magento_id`` """
         return self.backend_adapter.read(self.magento_id, storeview_id)
 
-    def run(self, magento_id, binding_id):
+    def run(self, magento_id, binding_id, mapper_class=None):
         self.magento_id = magento_id
         session = self.session
         storeview_ids = session.search(
-                'magento.storeview',
-                [('backend_id', '=', self.backend_record.id)])
+            'magento.storeview',
+            [('backend_id', '=', self.backend_record.id)])
         storeviews = session.browse('magento.storeview', storeview_ids)
         default_lang = self.backend_record.default_lang_id
         lang_storeviews = [sv for sv in storeviews
@@ -259,17 +325,21 @@ class TranslationImporter(ImportSynchronizer):
         translatable_fields = [field for field, attrs in fields.iteritems()
                                if attrs.get('translate')]
 
+        if mapper_class is None:
+            mapper = self.mapper
+        else:
+            mapper = self.get_connector_unit_for_model(mapper_class)
+
         for storeview in lang_storeviews:
             lang_record = self._get_magento_data(storeview.magento_id)
-            self.mapper.convert(lang_record)
-            record = self.mapper.data
+            map_record = mapper.map_record(lang_record)
+            record = map_record.values()
 
             data = dict((field, value) for field, value in record.iteritems()
                         if field in translatable_fields)
 
-            context = session.context.copy()
-            context['lang'] = storeview.lang_id.code
-            with self.session.change_context({'connector_no_export': True}):
+            ctx = {'connector_no_export': True, 'lang': storeview.lang_id.code}
+            with self.session.change_context(ctx):
                 self.session.write(self.model._name, binding_id, data)
 
 
@@ -302,6 +372,7 @@ def import_batch(session, model_name, backend_id, filters=None):
 
 
 @job
+@related_action(action=link)
 def import_record(session, model_name, backend_id, magento_id, force=False):
     """ Import a record from Magento """
     env = get_environment(session, model_name, backend_id)
