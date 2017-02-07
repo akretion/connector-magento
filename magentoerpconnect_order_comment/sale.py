@@ -283,6 +283,8 @@ class SaleCommentExportMapper(ExportMapper):
 
     @mapping
     def status(self, record):
+	if record.status:
+            return {'status': record.status}
         state = record.magento_sale_order_id.openerp_id.state
         return {'status': sale.ORDER_STATUS_MAPPING.get(state, 'pending')}
 

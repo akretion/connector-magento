@@ -28,6 +28,7 @@ from openerp.tools.translate import _
 from openerp.addons.connector.connector import ConnectorUnit
 from openerp.addons.connector.exception import (NothingToDoJob,
                                                 FailedJobError,
+                                                RetryableJobError, # david
                                                 IDMissingInBackend)
 from openerp.addons.connector.queue.job import job
 from openerp.addons.connector.unit.mapper import (mapping,
@@ -46,6 +47,7 @@ from .exception import OrderImportRuleRetry
 from .backend import magento
 from .connector import get_environment
 from .partner import PartnerImportMapper
+from phpserialize import loads
 
 _logger = logging.getLogger(__name__)
 
@@ -309,9 +311,19 @@ class SaleImportRule(ConnectorUnit):
             raise OrderImportRuleRetry('The order has not been paid.\n'
                                        'The import will be retried later.')
 
+    # david
+    def _rule_done(self, record, method):
+        """ import the order it's complete"""
+        if record['state'] != 'complete':
+            raise RetryableJobError(
+                'Orders only must be imported when they are in Done state')
+        else:
+            print '\t\t\t ------*-*-*-  order will be IMPORTED    <<<<<<<<-----------'
+
     _rules = {'always': _rule_always,
               'paid': _rule_paid,
               'authorized': _rule_authorized,
+              'done': _rule_done,   # david
               'never': _rule_never,
               }
 
@@ -377,9 +389,9 @@ class SaleOrderImport(MagentoImportSynchronizer):
 
     @property
     def mapper(self):
-       if self._mapper is None:
-           self._mapper = self.environment.get_connector_unit(SaleOrderImportMapper)
-       return self._mapper
+        if self._mapper is None:
+            self._mapper = self.environment.get_connector_unit(SaleOrderImportMapper)
+        return self._mapper
 
     def _must_skip(self):
         """ Hook called right after we read the data from the backend.
@@ -406,9 +418,20 @@ class SaleOrderImport(MagentoImportSynchronizer):
         """
         child_items = {}  # key is the parent item id
         top_items = []
-
         # Group the childs with their parent
+        #import pdb;pdb.set_trace()
         for item in resource['items']:
+            # david
+            key = 'product_options'
+            #print item['sku']
+            if item.get(key):
+                # loads is used to unserialized php datas
+                serialize_string = item[key]
+                try:
+                    item[key] = loads(item[key].encode('utf-8'), decode_strings=True)
+                except Exception, e:
+                    print '\t\t\t      >>>>>>>>>>>>> serialized not decoded <<<<<<<<<<<<'
+            # end david
             if item.get('parent_item_id'):
                 child_items.setdefault(item['parent_item_id'], []).append(item)
             else:
@@ -911,18 +934,26 @@ class SaleOrderLineImportMapper(ImportMapper):
 
     direct = [('qty_ordered', 'product_uom_qty'),
               ('qty_ordered', 'product_uos_qty'),
-              ('name', 'name'),
+              # ('name', 'name'),   # david
               ('item_id', 'magento_id'),
               ('parent_item_id', 'magento_parent_item_id'),
             ]
 
     @mapping
     def discount_amount(self, record):
-        discount_value = float(record.get('discount_amount', 0))
+        #discount_value = float(record.get('discount_amount', 0))
+        #david
+        discount_value = 0.0
+        if 'base_affiliateplus_amount' in record and record['base_affiliateplus_amount'] != None:
+            discount_value = float(record.get('base_affiliateplus_amount', 0))
         if self.backend_record.catalog_price_tax_included:
-            row_total = float(record.get('row_total_incl_tax', 0))
+            row_total = record.get('row_total_incl_tax', 0)
         else:
-            row_total = float(record.get('row_total', 0))
+            row_total = record.get('row_total', 0)
+        if row_total:
+            row_total = float(row_total)
+        else:
+            row_total = 0.0
         discount = 0
         if discount_value > 0 and row_total > 0:
             discount = 100 * discount_value / row_total
@@ -938,22 +969,68 @@ class SaleOrderLineImportMapper(ImportMapper):
                 "SaleOrderImport._import_dependencies" % record['product_id'])
         return {'product_id': product_id}
 
+    #@mapping
+    #def product_options(self, record):
+    #    result = {}
+    #    ifield = record['product_options']
+    #    if ifield:
+    #        import re
+    #        options_label = []
+    #        clean = re.sub('\w:\w:|\w:\w+;', '', ifield)
+    #        for each in clean.split('{'):
+    #            if each.startswith('"label"'):
+    #                split_info = each.split(';')
+    #                options_label.append('%s: %s [%s]' % (split_info[1],
+    #                                                      split_info[3],
+    #                                                      record['sku']))
+    #        result = {'notes':  "".join(options_label).replace('""', '\n').replace('"', '')}
+    #    return result
+
+    # david
     @mapping
-    def product_options(self, record):
-        result = {}
-        ifield = record['product_options']
-        if ifield:
-            import re
-            options_label = []
-            clean = re.sub('\w:\w:|\w:\w+;', '', ifield)
-            for each in clean.split('{'):
-                if each.startswith('"label"'):
-                    split_info = each.split(';')
-                    options_label.append('%s: %s [%s]' % (split_info[1],
-                                                          split_info[3],
-                                                          record['sku']))
-            result = {'notes':  "".join(options_label).replace('""', '\n').replace('"', '')}
-        return result
+    def name(self, record):
+        name = record['name']
+        #print 'map name', record['sku'], record['name']
+        #if hasattr(self, '_last_bundle_item_id') \
+                #and 'product_options' in record \
+        if 'product_options' in record \
+                and isinstance(record['product_options'], dict):
+            if 'bundle_selection_attributes' in record['product_options']:
+                #bundle_select_attr = loads(
+                #    record['product_options']['bundle_selection_attributes'].encode('utf-8'),
+                #    decode_strings=True)
+                bundle_select_attr2 = loads(record['product_options']['bundle_selection_attributes'].encode('utf-8'), decode_strings=True)
+                #print '    bundle_selection_attributes TOOO ', bundle_select_attr2
+                #print 'opt_id', bundle_select_attr['option_id']
+                name += ': %s' % bundle_select_attr2['option_label']
+                #print '     parent:', record['parent_item_id'], '    bundle:'
+        if 'product_options' in record \
+                and isinstance(record['product_options'], dict):
+            # the bundle
+            #self._last_bundle_item_id = record.get('item_id', '')
+            #self._last_bundle = {}
+            if 'options' in record['product_options']:
+                # gamer tag
+                options = [elm['label'] + ': ' + elm['print_value']
+                           for elm in record['product_options']['options'].values()]
+                name += '\nOptions:\n  - ' + '\n  - '.join(options)
+            #if 'bundle_options' in record['product_options']:
+            #    self._last_bundle = \
+            #        {key: val
+            #         for key, val
+            #         in record['product_options']['bundle_options'].items()}
+            #    bundle_options = ['%s %s: %s' % (
+            #                                record['product_options']['bundle_options'][elm]['value'][0]['qty'],
+            #                                record['product_options']['bundle_options'][elm]['value'][0]['title'],
+            #                                record['product_options']['bundle_options'][elm]['label'],
+            #                            )
+            #                  for elm in record['product_options']['bundle_options']]
+            #    bundle_options = [record['product_options']['bundle_options'][elm]['label'] for elm in record['product_options']['bundle_options']]
+        #else:
+        #    orm.except_orm("Failed OPTIONS", record['product_options'])
+
+        #print 'final::::', name
+        return {'name': name}
 
     @mapping
     def price(self, record):

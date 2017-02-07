@@ -66,7 +66,7 @@ class magento_product_product(orm.Model):
             ('configurable', 'Configurable Product'),
             # XXX activate when supported
             # ('grouped', 'Grouped Product'),
-            # ('virtual', 'Virtual Product'),
+             ('virtual', 'Virtual Product'),
             # ('bundle', 'Bundle Product'),
             # ('downloadable', 'Downloadable Product'),
         ]
@@ -181,6 +181,7 @@ class ProductProductAdapter(GenericAdapter):
 
     def _call(self, method, arguments):
         try:
+            print method
             return super(ProductProductAdapter, self)._call(method, arguments)
         except xmlrpclib.Fault as err:
             # this is the error in the Magento API
@@ -394,11 +395,11 @@ class ProductImport(MagentoImportSynchronizer):
 
     def _import_bundle_dependencies(self):
         """ Import the dependencies for a Bundle """
-        bundle = self.magento_record['_bundle_data']
-        for option in bundle['options']:
-            for selection in option['selections']:
-                self._import_dependency(selection['product_id'],
-                                        'magento.product.product')
+        #bundle = self.magento_record['_bundle_data']
+        #for option in bundle['options']:
+        #    for selection in option['selections']:
+        #        self._import_dependency(selection['product_id'],
+        #                                'magento.product.product')
 
     def _import_dependencies(self):
         """ Import the dependencies for the record"""
@@ -516,7 +517,10 @@ class ProductImportMapper(ImportMapper):
         """ The price is imported at the creation of
         the product, then it is only modified and exported
         from OpenERP """
-        return {'list_price': record.get('price', 0.0)}
+        # david
+        #return {'list_price': record.get('price', 0.0)}
+        print '\n\n          >>>>>>>>> je mets à jour  LE PRIX'
+        return {'list_price_tax_inc': record.get('price', 0.0)}
 
     @mapping
     def type(self, record):

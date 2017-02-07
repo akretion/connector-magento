@@ -153,13 +153,24 @@ class MagentoCRUDAdapter(CRUDAdapter):
                                 self.magento.username,
                                 self.magento.password,
                                 full_url=custom_url) as api:
-                result = api.call(method, arguments)
+                _logger.info("api.call(%s, %s)", method, arguments)
+                try:
+                    result = api.call(method, arguments)
+                except:
+                    try:
+                        _logger.info("RETRY api.call(%s, %s)", method, arguments)
+                        result = api.call(method, arguments)
+                    except:
+                        _logger.info("RETRY 2 api.call(%s, %s)", method, arguments)
+                        result = api.call(method, arguments)
+                _logger.info("api.call done")
                 # Uncomment to record requests/responses in ``recorder``
                 # record(method, arguments, result)
                 _logger.debug("api.call(%s, %s) returned %s",
                               method, arguments, result)
                 return result
         except (socket.gaierror, socket.error, socket.timeout) as err:
+            _logger.info("api.call was (%s, %s)", method, arguments)
             raise NetworkRetryableError(
                 'A network error caused the failure of the job: '
                 '%s' % err)

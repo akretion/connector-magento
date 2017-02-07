@@ -127,6 +127,7 @@ class StockPickingAdapter(GenericAdapter):
         :param tracking_title: title displayed on Magento for the tracking
         :param tracking_number: tracking number
         """
+        tracking_number = tracking_number.replace(' ', '')
         return self._call('%s.addTrack' % self._magento_model,
                           [magento_id, carrier_code,
                            tracking_title, tracking_number])
@@ -258,6 +259,17 @@ def export_picking_done(session, model_name, record_id):
     env = get_environment(session, model_name, backend_id)
     picking_exporter = env.get_connector_unit(MagentoPickingExport)
     res = picking_exporter.run(record_id)
+
+    for magento_sale in picking.sale_id.magento_bind_ids:
+        vals = {
+            'is_visible_on_front': True,
+            'is_customer_notified': True,
+            'magento_sale_order_id': magento_sale.id,
+            'status': 'complete',
+            'body': 'Commande terminée',
+            'type': 'notification',
+            }
+        session.create('magento.sale.comment', vals)
 
     if picking.carrier_tracking_ref:
         export_tracking_number.delay(session, model_name, record_id)
