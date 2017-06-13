@@ -1020,9 +1020,9 @@ class SaleOrderLineImportMapper(ImportMapper):
             #self._last_bundle = {}
             if 'options' in record['product_options']:
                 # gamer tag
-                options = [elm['label'] + ': ' + elm['print_value']
+                options = [elm['label'] + u': ' + (elm['print_value'] or '')
                            for elm in record['product_options']['options'].values()]
-                name += '\nOptions:\n  - ' + '\n  - '.join(options)
+                name += u'\nOptions:\n  - ' + '\n  - '.join(options)
             #if 'bundle_options' in record['product_options']:
             #    self._last_bundle = \
             #        {key: val
