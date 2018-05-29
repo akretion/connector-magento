@@ -64,6 +64,7 @@ class magento_product_product(orm.Model):
         return [
             ('simple', 'Simple Product'),
             ('configurable', 'Configurable Product'),
+            ('configurateur', 'configurateur'),
             # XXX activate when supported
             # ('grouped', 'Grouped Product'),
              ('virtual', 'Virtual Product'),
@@ -232,6 +233,11 @@ class ProductProductAdapter(GenericAdapter):
         # product_stock.update is too slow
         return self._call('oerp_cataloginventory_stock_item.update',
                           [int(id), data])
+
+    def update_inventory_sku(self, sku, data):
+        # product_stock.update is too slow
+        return self._call('oerp_cataloginventory_stock_item.update',
+                          [sku, data])
 
 
 @magento
@@ -621,7 +627,7 @@ class ProductInventoryExport(ExportSynchronizer):
         binder = self.get_binder_for_model()
         magento_id = binder.to_backend(product.id)
         data = self._get_data(product, fields)
-        self.backend_adapter.update_inventory(magento_id, data)
+        self.backend_adapter.update_inventory_sku(product.default_code, data)
 
 
 # fields which should not trigger an export of the products
