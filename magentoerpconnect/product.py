@@ -236,6 +236,8 @@ class ProductProductAdapter(GenericAdapter):
 
     def update_inventory_sku(self, sku, data):
         # product_stock.update is too slow
+        if data['qty'] < 0:
+            data['qty'] = 0
         return self._call('oerp_cataloginventory_stock_item.update',
                           [sku, data])
 
