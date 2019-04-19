@@ -65,7 +65,7 @@
                                 in the menu 'Connectors > Checkpoint'.
                             </p>
                             <group>
-                                <label string="Import all customer groups" class="oe_inline"/>
+                                <label string="Import all customer groups" class="oe_inline" for="import_customer_groups"/>
                                 <div>
                                     <button name="import_customer_groups"
                                         type="object"
@@ -74,7 +74,7 @@
                                 </div>
                             </group>
                             <group>
-                                <label string="Import partners from all websites" class="oe_inline"/>
+                                <label string="Import partners from all websites" class="oe_inline" for="import_partners"/>
                                 <button name="import_partners"
                                     type="object"
                                     class="oe_highlight"
@@ -82,7 +82,7 @@
                             </group>
                             <group>
                                 <div>
-                                    <label string="Import products categories since" class="oe_inline"/>
+                                    <label string="Import products categories since" class="oe_inline" for="import_categories_from_date"/>
                                     <field name="import_categories_from_date"
                                         class="oe_inline"
                                         nolabel="1"/>
@@ -94,7 +94,7 @@
                             </group>
                             <group>
                                 <div>
-                                    <label string="Import products since" class="oe_inline"/>
+                                    <label string="Import products since" class="oe_inline" for="import_products_from_date"/>
                                     <field name="import_products_from_date"
                                         class="oe_inline"
                                         nolabel="1"/>
@@ -105,14 +105,14 @@
                                     string="Import in background"/>
                             </group>
                             <group>
-                                <label string="Import sales orders from all store views" class="oe_inline"/>
+                                <label string="Import sales orders from all store views" class="oe_inline" for="import_sale_orders"/>
                                 <button name="import_sale_orders"
                                     type="object"
                                     class="oe_highlight"
                                     string="Import in background"/>
                             </group>
                             <group>
-                                <label string="Update all the products stock quantities" class="oe_inline"/>
+                                <label string="Update all the products stock quantities" class="oe_inline" for="update_product_stock_qty"/>
                                 <button name="update_product_stock_qty"
                                     type="object"
                                     class="oe_highlight"
@@ -196,7 +196,7 @@
                         <page name="import" string="Imports">
                             <group>
                                 <div>
-                                    <label string="Import partners since" class="oe_inline"/>
+                                    <label string="Import partners since" class="oe_inline" for="import_partners_from_date"/>
                                     <field name="import_partners_from_date"
                                         class="oe_inline"
                                         nolabel="1"/>
@@ -343,7 +343,7 @@
                             <group colspan="4">
                               <div>
                                 <label string="Import Sale Orders since"
-                                       class="oe_inline"/>
+                                       class="oe_inline" for="import_orders_from_date"/>
                                 <field name='import_orders_from_date'
                                        class="oe_inline"
                                        nolabel="1"/>
