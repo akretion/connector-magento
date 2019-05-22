@@ -15,6 +15,8 @@ are already bound, to update the last sync date.
 """
 
 import logging
+import psycopg2
+from random import randint
 from odoo import fields, _
 from odoo.addons.component.core import AbstractComponent, Component
 from odoo.addons.connector.exception import IDMissingInBackend
@@ -212,7 +214,15 @@ class MagentoImporter(AbstractComponent):
             self._update(binding, record)
         else:
             record = self._create_data(map_record)
-            binding = self._create(record)
+            try:
+                if 'default_code' in record:
+                    print('HHHHHHHHHHH', binding, map_record, record)
+                binding = self._create(record)
+            except: # psycopg2.IntegrityError:
+                if 'default_code' in record:
+                    record['default_code'] = record['default_code'] + "-TODO-" + str(randint(0, 1000))
+                    print("**********", record)
+                    binding = self._create(record)
 
         self.binder.bind(self.external_id, binding)
 

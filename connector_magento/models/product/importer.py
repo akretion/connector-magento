@@ -312,6 +312,13 @@ class ProductImporter(Component):
         self._validate_product_type(data)
 
     def _create(self, data):
+        if 'default_code' in data:
+            print("WITH DEFAULT CODE", data)
+            odoo_ids = self.env['product.product'].search(
+                [('default_code', '=', data['default_code'])])
+            if len(odoo_ids) > 0:
+                data['odoo_id'] = odoo_ids[0].id
+                print("***** FOUND", odoo_ids)
         binding = super(ProductImporter, self)._create(data)
         self.backend_record.add_checkpoint(binding)
         return binding
