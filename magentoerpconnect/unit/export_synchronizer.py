@@ -468,6 +468,8 @@ class MagentoTranslationExporter(MagentoExporter):
         lang_storeviews = [sv for sv in storeviews
                            if sv.lang_id and sv.lang_id != default_lang]
         before_read = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S.%f')
+        after_read = ''
+        after_write = ''
         #TODO FIXME
         fields = []
         if lang_storeviews:
@@ -488,8 +490,8 @@ class MagentoTranslationExporter(MagentoExporter):
                     after_read = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S.%f')
                     self.backend_adapter.write(
                         self.magento_id, record, magento_storeview_id)
-        after_write = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S.%f')
-        res = res + 'start traduction : %s \n before_read : %s \n after_read : %s \n after_write : %s' % (start, before_read, after_read, after_write)
+                    after_write = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S.%f')
+        res = res + ' \nstart traduction : %s \nBefore read : %s \nAfter read : %s \nAfter write : %s' % (start, before_read, after_read, after_write)
         return res
 
 
