@@ -460,13 +460,14 @@ class MagentoTranslationExporter(MagentoExporter):
             session.context = {}
         session.context['lang'] = default_lang.code
         res = super(MagentoTranslationExporter, self)._run(fields)
-        
+        start = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S.%f')
         storeview_ids = session.search(
                 'magento.storeview',
                 [('backend_id', '=', self.backend_record.id)])
         storeviews = session.browse('magento.storeview', storeview_ids)
         lang_storeviews = [sv for sv in storeviews
                            if sv.lang_id and sv.lang_id != default_lang]
+        before_read = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S.%f')
         #TODO FIXME
         fields = []
         if lang_storeviews:
@@ -484,8 +485,11 @@ class MagentoTranslationExporter(MagentoExporter):
                     self._validate_data(record)
                     binder = self.get_binder_for_model('magento.storeview')
                     magento_storeview_id = binder.to_backend(storeview.id)
+                    after_read = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S.%f')
                     self.backend_adapter.write(
                         self.magento_id, record, magento_storeview_id)
+        after_write = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S.%f')
+        res = res + 'start traduction : %s \n before_read : %s \n after_read : %s \n after_write : %s' % (start, before_read, after_read, after_write)
         return res
 
 
