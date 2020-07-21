@@ -411,12 +411,14 @@ class MagentoExporter(MagentoBaseExporter):
         after_create = ''
         if self.magento_id:
             record = self._update_data(map_record, fields=fields)
+            after_update = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S.%f')
             if not record:
                 return _('Nothing to export.')
             self._update(record)
             after_write = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S.%f')
         else:
             record = self._create_data(map_record, fields=fields)
+            after_update = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S.%f')
             if not record:
                 return _('Nothing to export.')
             self.magento_id = self._create(record)
@@ -426,8 +428,9 @@ class MagentoExporter(MagentoBaseExporter):
                  'Start : %s \n'
                  'Before read: %s \n'
                  'After read : %s \n'
+                 'After update : %s \n'
                  'After write: %s \n'
-                 'After create : %s') % (self.magento_id, dependencies_exported, start, before_read, after_read, after_write, after_create)
+                 'After create : %s') % (self.magento_id, dependencies_exported, start, before_read, after_read, after_update, after_write, after_create)
 
 
 @job
